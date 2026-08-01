@@ -258,7 +258,7 @@ export default function NavBar() {
   ];
 
   return (
-    <nav className="fixed top-0 left-0 bottom-0 z-40 bg-[#FBF8F3] border-r border-[#EAE3D5] shadow-lg flex flex-col justify-between transition-all duration-300 w-16 md:w-64 py-6">
+    <nav className="fixed top-0 left-0 bottom-0 z-40 bg-[#FBF8F3] dark:bg-[#0A1114] border-r border-[#EAE3D5] dark:border-[#1E2C33] shadow-lg flex flex-col justify-between transition-all duration-300 w-16 md:w-64 py-6">
       
       {/* Brand Header */}
       <div className="px-3 md:px-6">
@@ -280,11 +280,11 @@ export default function NavBar() {
             </svg>
           </div>
           <div className="hidden md:block">
-            <h1 className="text-base font-bold font-['Lora'] text-[#0E3D4D] leading-none">Medicina</h1>
+            <h1 className="text-base font-bold font-['Lora'] text-[#0E3D4D] dark:text-white leading-none">Medicina</h1>
             <span className="text-[10px] font-semibold text-[#B5502B] uppercase tracking-wider">Ciclo 2029</span>
           </div>
         </Link>
-        <div className="h-[1px] bg-[#EAE3D5] my-6" />
+        <div className="h-[1px] bg-[#EAE3D5] dark:bg-[#1E2C33] my-6" />
       </div>
 
       {/* Nav List */}
@@ -298,7 +298,7 @@ export default function NavBar() {
               className={`flex items-center gap-3 px-3 py-3 md:py-2.5 rounded-xl transition-all duration-200 group relative min-h-[44px] ${
                 isActive 
                   ? 'bg-[#0E3D4D] text-white shadow-md shadow-[#0E3D4D]/15' 
-                  : 'text-[#6A7D87] hover:bg-[#F1EFEA] hover:text-[#0E3D4D]'
+                  : 'text-[#6A7D87] dark:text-gray-400 hover:bg-[#F1EFEA] dark:hover:bg-[#15222B] hover:text-[#0E3D4D] dark:hover:text-white'
               }`}
             >
               <div className="flex items-center justify-center w-6 h-6 shrink-0">
@@ -306,7 +306,7 @@ export default function NavBar() {
               </div>
               <span
                 className={`text-xs font-semibold tracking-wide hidden md:block transition-colors ${
-                  isActive ? 'text-white font-bold' : 'text-[#6A7D87] group-hover:text-[#0E3D4D]'
+                  isActive ? 'text-white font-bold' : 'text-[#6A7D87] dark:text-gray-400 group-hover:text-[#0E3D4D] dark:group-hover:text-white'
                 }`}
               >
                 {item.label}
@@ -326,7 +326,7 @@ export default function NavBar() {
         <div className="flex items-center justify-center md:justify-start mb-2 relative group/theme">
           <button
             onClick={toggleTheme}
-            className="flex items-center justify-center w-10 h-10 md:w-full md:px-3 md:py-2 rounded-xl border border-[#EAE3D5] bg-[#F1EFEA] dark:border-[#344854] dark:bg-[#24353F] text-[#6A7D87] hover:text-[#0E3D4D] dark:text-gray-400 dark:hover:text-white transition-all cursor-pointer shadow-sm hover:scale-[1.02] active:scale-[0.98] min-h-[40px]"
+            className="flex items-center justify-center w-10 h-10 md:w-full md:px-3 md:py-2 rounded-xl border border-[#EAE3D5] bg-[#F1EFEA] dark:border-[#1E2C33] dark:bg-[#15222B] text-[#6A7D87] hover:text-[#0E3D4D] dark:text-gray-400 dark:hover:text-white transition-all cursor-pointer shadow-sm hover:scale-[1.02] active:scale-[0.98] min-h-[40px]"
             title="Alternar tema"
           >
             {!mounted ? (
@@ -356,13 +356,13 @@ export default function NavBar() {
             Alternar tema
           </div>
         </div>
-        <div className="h-[1px] bg-[#EAE3D5] my-4" />
+        <div className="h-[1px] bg-[#EAE3D5] dark:bg-[#1E2C33] my-4" />
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-full bg-[#B5502B]/10 border border-[#B5502B]/30 flex items-center justify-center font-bold text-xs text-[#B5502B] uppercase shadow-inner shrink-0">
             AA
           </div>
           <div className="hidden md:block truncate">
-            <h4 className="text-xs font-bold text-[#0E3D4D] truncate leading-snug">Alice Antunes</h4>
+            <h4 className="text-xs font-bold text-[#0E3D4D] dark:text-white truncate leading-snug">Alice Antunes</h4>
             <span className="text-[10px] text-gray-400 block truncate">Estudante</span>
           </div>
         </div>
