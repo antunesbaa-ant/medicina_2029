@@ -124,7 +124,7 @@ export default function HojePage({ dadosIniciais, metricasIniciais }: HojePagePr
   };
 
   return (
-    <div className="w-full max-w-md md:max-w-5xl mx-auto bg-[#FBF8F3] min-h-screen pb-24 px-4 pt-6 select-none font-poppins">
+    <div className="w-full max-w-md md:max-w-5xl mx-auto bg-transparent min-h-screen pb-24 px-4 pt-6 select-none font-poppins">
       
       {/* Header Sóbrio */}
       <header className="mb-6 flex justify-between items-center">
