@@ -4,12 +4,30 @@
   --font-poppins: var(--font-poppins), sans-serif;
   --font-lora: var(--font-lora), serif;
   
+  --color-petroleo: var(--color-petroleo);
+  --color-ativos: var(--color-ativos);
+  --color-terracota: var(--color-terracota);
+  --color-ambar: var(--color-ambar);
+  --color-creme: var(--color-creme);
+  --color-texto: var(--color-texto);
+}
+
+:root {
   --color-petroleo: #0E3D4D;
   --color-ativos: #17607A;
   --color-terracota: #B5502B;
   --color-ambar: #C98A2E;
   --color-creme: #FBF8F3;
   --color-texto: #1B2A33;
+}
+
+.dark {
+  --color-petroleo: #E0EBF0;
+  --color-ativos: #38A3C5;
+  --color-terracota: #B5502B;
+  --color-ambar: #C98A2E;
+  --color-creme: #1B2A33;
+  --color-texto: #F5F7F8;
 }
 
 body {
@@ -20,6 +38,104 @@ body {
   background-repeat: no-repeat;
   color: var(--color-texto);
   font-family: var(--font-poppins);
+  transition: background-image 0.3s ease, background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Dark theme overrides */
+.dark body {
+  background-image: url('/pencil_amber_dark_bg.jpg') !important;
+  color: var(--color-texto) !important;
+  background-color: #1B2A33 !important;
+}
+
+/* Redefine card background */
+.dark .bg-white {
+  background-color: #24353F !important;
+  color: #F5F7F8 !important;
+}
+
+/* Also apply to translucent bg-white versions if any exist */
+.dark .bg-white\/60 {
+  background-color: rgba(36, 53, 63, 0.6) !important;
+}
+.dark .bg-white\/80 {
+  background-color: rgba(36, 53, 63, 0.8) !important;
+}
+
+/* Remap generic light backgrounds to charcoal */
+.dark .bg-\[\#FBF8F3\] {
+  background-color: #1B2A33 !important;
+}
+.dark .bg-\[\#F1EFEA\] {
+  background-color: #24353F !important;
+}
+
+/* Make sure hovered items have a suitable dark highlight */
+.dark .hover\:bg-\[\#F1EFEA\]:hover {
+  background-color: #344854 !important;
+}
+.dark .hover\:bg-\[\#FBF8F3\]:hover {
+  background-color: #24353F !important;
+}
+
+/* Override borders to look clean on charcoal cards */
+.dark .border-gray-100,
+.dark .border-gray-200,
+.dark .border-gray-300,
+.dark .border-gray-200\/80,
+.dark .border-gray-200\/60,
+.dark .border-\[\#EAE3D5\],
+.dark .border-\[\#D5CBB8\] {
+  border-color: #344854 !important;
+}
+
+/* Adjust dark blue primary text/headings to light slate */
+.dark .text-\[\#0E3D4D\] {
+  color: #E2E8F0 !important;
+}
+.dark .hover\:text-\[\#0E3D4D\]:hover {
+  color: #FFFFFF !important;
+}
+
+/* Adjust secondary/muted texts */
+.dark .text-\[\#6A7D87\] {
+  color: #94A3B8 !important;
+}
+.dark .text-\[\#1B2A33\] {
+  color: #F5F7F8 !important;
+}
+.dark .text-gray-900,
+.dark .text-gray-800,
+.dark .text-gray-700 {
+  color: #F1F5F9 !important;
+}
+.dark .text-gray-600,
+.dark .text-gray-500 {
+  color: #CBD5E1 !important;
+}
+.dark .text-gray-400 {
+  color: #94A3B8 !important;
+}
+
+/* Make form elements (select, input, textarea) inside dark theme styled nicely */
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #1B2A33 !important;
+  color: #F5F7F8 !important;
+  border-color: #344854 !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748B !important;
+}
+
+/* For secondary/active elements inside study system and timer */
+.dark .bg-white.border-\[\#D5CBB8\] {
+  background-color: #24353F !important;
+  color: #F5F7F8 !important;
+  border-color: #344854 !important;
 }
 
 main {
