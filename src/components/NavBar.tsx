@@ -8,28 +8,8 @@ export default function NavBar() {
 
   const navItems = [
     {
-      label: 'Hoje',
+      label: 'Dashboard',
       path: '/',
-      icon: (active: boolean) => (
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth={2}
-          stroke={active ? '#FFFFFF' : '#6A7D87'}
-          className="w-5 h-5 transition-colors"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M9 12h3.75M9 15h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-.621-.504-1.125-1.125-1.125H9.75M8.25 21h8.25c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H8.25c-.621 0-1.125.504-1.125 1.125v14.25c0 .621.504 1.125 1.125 1.125z"
-          />
-        </svg>
-      ),
-    },
-    {
-      label: 'Métricas',
-      path: '/dashboard',
       icon: (active: boolean) => (
         <svg
           xmlns="http://www.w3.org/2000/svg"

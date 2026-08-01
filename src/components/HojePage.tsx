@@ -5,12 +5,16 @@ import { CicloAtivoData } from '../app/actions/ciclo';
 import { MOCK_TOPICOS } from '../lib/mocks';
 import { registrarCheckin } from '../app/actions/checkin';
 import Link from 'next/link';
+import { DashboardMetrics } from '../app/actions/dashboard';
+import DashboardPage from './DashboardPage';
 
 interface HojePageProps {
   dadosIniciais: CicloAtivoData | null;
+  metricasIniciais: DashboardMetrics | null;
 }
 
-export default function HojePage({ dadosIniciais }: HojePageProps) {
+export default function HojePage({ dadosIniciais, metricasIniciais }: HojePageProps) {
+  const [activeTab, setActiveTab] = useState<'hoje' | 'metricas'>('hoje');
   // Próximo bloco do ciclo
   const [ciclo, setCiclo] = useState<CicloAtivoData | null>(dadosIniciais);
   const [proximaOrdem, setProximaOrdem] = useState<number>(dadosIniciais?.proximaOrdem ?? 1);
@@ -128,13 +132,35 @@ export default function HojePage({ dadosIniciais }: HojePageProps) {
           <h1 className="text-2xl font-bold text-[#0E3D4D] tracking-tight">Medicina 2029</h1>
           <p className="text-xs text-[#6A7D87] font-medium">Fortaleza, Ceará</p>
         </div>
-        <div className="bg-[#EAE3D5] text-[#0E3D4D] text-xs font-semibold px-3 py-1.5 rounded-full border border-[#D5CBB8]">
-          Hoje
+        
+        {/* Alternador de abas */}
+        <div className="flex space-x-1 bg-[#EAE3D5]/50 p-1 rounded-xl border border-[#D5CBB8]/30">
+          <button
+            onClick={() => setActiveTab('hoje')}
+            className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${
+              activeTab === 'hoje'
+                ? 'bg-[#0E3D4D] text-white shadow-sm'
+                : 'text-[#6A7D87] hover:text-[#0E3D4D]'
+            }`}
+          >
+            Hoje
+          </button>
+          <button
+            onClick={() => setActiveTab('metricas')}
+            className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${
+              activeTab === 'metricas'
+                ? 'bg-[#0E3D4D] text-white shadow-sm'
+                : 'text-[#6A7D87] hover:text-[#0E3D4D]'
+            }`}
+          >
+            Métricas
+          </button>
         </div>
       </header>
 
-      {/* Grid responsivo para PC */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+      {activeTab === 'hoje' ? (
+        /* Grid responsivo para PC */
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
         
         {/* Coluna Esquerda: Bloco de Foco e Status (md:col-span-7) */}
         <div className="md:col-span-7 space-y-5">
@@ -401,6 +427,11 @@ export default function HojePage({ dadosIniciais }: HojePageProps) {
         </div>
 
       </div>
+      ) : (
+        <div className="mt-4">
+          <DashboardPage dadosIniciais={metricasIniciais} embedded={true} />
+        </div>
+      )}
 
     </div>
   );

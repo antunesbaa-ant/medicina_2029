@@ -3,11 +3,16 @@
 import { useState, useEffect } from 'react';
 import { obterMetricasDashboard, DashboardMetrics } from '../app/actions/dashboard';
 
-export default function DashboardPage() {
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+export default function DashboardPage({ dadosIniciais, embedded = false }: { dadosIniciais?: DashboardMetrics | null; embedded?: boolean }) {
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(dadosIniciais || null);
+  const [loading, setLoading] = useState<boolean>(!dadosIniciais);
 
   useEffect(() => {
+    if (dadosIniciais) {
+      setMetrics(dadosIniciais);
+      setLoading(false);
+      return;
+    }
     async function loadMetrics() {
       try {
         const data = await obterMetricasDashboard();
@@ -19,7 +24,7 @@ export default function DashboardPage() {
       }
     }
     loadMetrics();
-  }, []);
+  }, [dadosIniciais]);
 
   if (loading || !metrics) {
     return (
@@ -42,15 +47,17 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto px-4 py-8 pb-24 font-['Poppins'] text-[#1B2A33] space-y-8">
+    <div className={embedded ? "space-y-8 text-[#1B2A33] font-['Poppins']" : "max-w-6xl mx-auto px-4 py-8 pb-24 font-['Poppins'] text-[#1B2A33] space-y-8"}>
       
       {/* Header */}
-      <header className="border-b pb-6 text-center md:text-left">
-        <h1 className="text-3xl font-bold font-['Lora'] text-[#0E3D4D]">Painel Analítico de Desempenho</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Métricas derivadas e diagnósticos automáticos baseados nas sessões e tentativas de estudos da estudante.
-        </p>
-      </header>
+      {!embedded && (
+        <header className="border-b pb-6 text-center md:text-left">
+          <h1 className="text-3xl font-bold font-['Lora'] text-[#0E3D4D]">Painel Analítico de Desempenho</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Métricas derivadas e diagnósticos automáticos baseados nas sessões e tentativas de estudos da estudante.
+          </p>
+        </header>
+      )}
 
       {/* Grid de Métricas Principais (3 cols no PC) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -210,6 +217,24 @@ export default function DashboardPage() {
               />
             </div>
           </section>
+
+          {/* Saúde da Curadoria */}
+          {metrics.saudeCuradoria && (
+            <section className={`bg-white p-5 rounded-2xl border shadow-sm flex items-center justify-between transition-all hover:shadow-md ${
+              metrics.saudeCuradoria.alerta ? 'border-rose-500/20 bg-rose-500/[0.01]' : 'border-gray-200'
+            }`}>
+              <div>
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Saúde da Curadoria</span>
+                <h4 className="text-2xl font-bold text-[#0E3D4D] mt-1">{metrics.saudeCuradoria.pendentes} pendentes</h4>
+                <span className="text-[10px] text-gray-400 mt-1 block">Mais antigo: {metrics.saudeCuradoria.idadeMinimaDias} dias na fila</span>
+              </div>
+              {metrics.saudeCuradoria.alerta ? (
+                <span className="bg-rose-500/10 text-rose-600 text-[10px] font-bold px-2 py-1 rounded border border-rose-500/20 uppercase">Alerta</span>
+              ) : (
+                <span className="bg-emerald-500/10 text-emerald-600 text-[10px] font-bold px-2 py-1 rounded border border-emerald-500/10 uppercase">Saudável</span>
+              )}
+            </section>
+          )}
 
         </div>
 
