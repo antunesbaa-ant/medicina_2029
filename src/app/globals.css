@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --font-poppins: var(--font-poppins), sans-serif;
+  --font-lora: var(--font-lora), serif;
+  
+  --color-petroleo: #0E3D4D;
+  --color-ativos: #17607A;
+  --color-terracota: #B5502B;
+  --color-ambar: #C98A2E;
+  --color-creme: #FBF8F3;
+  --color-texto: #1B2A33;
+}
+
+body {
+  background-color: var(--color-creme);
+  color: var(--color-texto);
+  font-family: var(--font-poppins);
+}
+
+.font-lora-read {
+  font-family: var(--font-lora);
+}
+
+/* Custom scrollbars for high information density lists */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F2EBE1;
+}
+::-webkit-scrollbar-thumb {
+  background: #C7BAA7;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #A89A85;
+}
+
