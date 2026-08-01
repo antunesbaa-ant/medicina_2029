@@ -13,9 +13,17 @@
 }
 
 body {
-  background-color: var(--color-creme);
+  background-image: url('/pencil_amber_bg.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
   color: var(--color-texto);
   font-family: var(--font-poppins);
+}
+
+main {
+  background-color: transparent !important;
 }
 
 .font-lora-read {
