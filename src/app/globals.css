@@ -43,7 +43,7 @@ body {
 
 /* Dark theme overrides */
 .dark body {
-  background-image: url('/pencil_amber_dark_bg.jpg') !important;
+  background-image: url('/pencil_amber_dark_bg.jpg?v=med2') !important;
   color: var(--color-texto) !important;
   background-color: #1B2A33 !important;
 }
