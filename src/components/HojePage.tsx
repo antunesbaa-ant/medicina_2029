@@ -31,9 +31,17 @@ export default function HojePage({ dadosIniciais, metricasIniciais }: HojePagePr
   const [energia, setEnergia] = useState<number>(4);
   const [notaLivre, setNotaLivre] = useState<string>('');
   const [salvandoCheckin, setSalvandoCheckin] = useState<boolean>(false);
+  const [dataHoje, setDataHoje] = useState<string>('');
 
   // Carregar dados locais (localStorage) para persistência offline/refresh
   useEffect(() => {
+    const formatter = new Intl.DateTimeFormat('pt-BR', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+    setDataHoje(formatter.format(new Date()));
+
     // 1. Ler ordem atualizada localmente se houver (para refletir sessões concluídas)
     const localOrdem = localStorage.getItem('medicina_2029_proxima_ordem');
     if (localOrdem) {
@@ -130,7 +138,7 @@ export default function HojePage({ dadosIniciais, metricasIniciais }: HojePagePr
       <header className="mb-6 flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-[#0E3D4D] tracking-tight">Medicina 2029</h1>
-          <p className="text-xs text-[#6A7D87] font-medium">Fortaleza, Ceará</p>
+          <p className="text-xs text-[#6A7D87] font-medium">Fortaleza, Ceará • {dataHoje}</p>
         </div>
         
         {/* Alternador de abas */}

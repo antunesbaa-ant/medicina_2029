@@ -10,6 +10,7 @@ export default function NavBar() {
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [mounted, setMounted] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [dataHoje, setDataHoje] = useState<string>('');
   const { data: session } = useSession();
   
   const userName = session?.user?.name || 'Estudante';
@@ -24,6 +25,13 @@ export default function NavBar() {
     .toUpperCase() || 'U';
 
   useEffect(() => {
+    const date = new Date();
+    setDataHoje(date.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    }));
+
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
     const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     const activeTheme = savedTheme || systemTheme;
@@ -330,7 +338,10 @@ export default function NavBar() {
           {!isCollapsed && (
             <Link href="/" className="block truncate">
               <h1 className="text-base font-bold font-['Lora'] text-[#0E3D4D] dark:text-white leading-none">Medicina</h1>
-              <span className="text-[10px] font-semibold text-[#B5502B] uppercase tracking-wider">Ciclo 2029</span>
+              <div className="flex flex-col mt-0.5">
+                <span className="text-[10px] font-semibold text-[#B5502B] uppercase tracking-wider leading-none">Ciclo 2029</span>
+                <span className="text-[9px] text-[#6A7D87] dark:text-gray-400 mt-1 font-semibold leading-none">{dataHoje}</span>
+              </div>
             </Link>
           )}
         </div>
