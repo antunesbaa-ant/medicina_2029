@@ -383,6 +383,7 @@ export const acervoArquivos = pgTable('acervo_arquivos', {
   tipoMaterial: tipoAcervoMaterialEnum('tipo_material').notNull(),
   autorFonte: varchar('autor_fonte', { length: 255 }),
   serieAlvo: integer('serie_alvo').notNull(),
+  vestibular: varchar('vestibular', { length: 50 }),
   filePath: varchar('file_path', { length: 1000 }).notNull(),
   mime: varchar('mime', { length: 100 }).notNull(),
   tamanhoBytes: integer('tamanho_bytes').notNull(),

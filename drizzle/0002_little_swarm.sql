@@ -1,0 +1,1 @@
+ALTER TABLE "acervo_arquivos" ADD COLUMN "vestibular" varchar(50);

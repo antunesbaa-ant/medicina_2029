@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { enviarArquivo, listarArquivosAcervo, obterAcervoStatus } from '../app/actions/acervo';
+import { enviarArquivo, listarArquivosAcervo, obterAcervoStatus, listarDisciplinas } from '../app/actions/acervo';
 import { obterCicloAtivo } from '../app/actions/ciclo';
 
 export default function AcervoPage() {
@@ -11,6 +11,7 @@ export default function AcervoPage() {
   const [titulo, setTitulo] = useState<string>('');
   const [tipoMaterial, setTipoMaterial] = useState<'livro' | 'apostila' | 'slide' | 'lista_exercicios' | 'anotacao_aula' | 'prova_oficial' | 'resumo_proprio' | 'outro'>('livro');
   const [serieAlvo, setSerieAlvo] = useState<number>(1);
+  const [vestibular, setVestibular] = useState<'enem' | 'uece'>('enem');
   const [arquivos, setArquivos] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -30,17 +31,9 @@ export default function AcervoPage() {
   useEffect(() => {
     async function loadData() {
       try {
-        const ciclo = await obterCicloAtivo();
-        if (ciclo && ciclo.blocos.length > 0) {
-          // Extrair disciplinas únicas do ciclo
-          const map = new Map<string, string>();
-          ciclo.blocos.forEach(b => {
-            map.set(b.disciplinaId, b.disciplina.nome);
-          });
-          const list = Array.from(map.entries()).map(([id, nome]) => ({ id, nome }));
-          setDisciplinas(list);
-          if (list.length > 0) setSelectedDisciplina(list[0].id);
-        }
+        const list = await listarDisciplinas();
+        setDisciplinas(list);
+        if (list.length > 0) setSelectedDisciplina(list[0].id);
 
         const files = await listarArquivosAcervo();
         setArquivos(files);
@@ -132,6 +125,7 @@ export default function AcervoPage() {
           titulo.trim(),
           tipoMaterial,
           serieAlvo,
+          vestibular,
           file.name,
           base64Data,
           perfilId
@@ -213,13 +207,13 @@ export default function AcervoPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Tipo</label>
                 <select
                   value={tipoMaterial}
                   onChange={e => setTipoMaterial(e.target.value as any)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-xs"
                 >
                   <option value="livro">Livro</option>
                   <option value="apostila">Apostila</option>
@@ -235,11 +229,24 @@ export default function AcervoPage() {
                 <select
                   value={serieAlvo}
                   onChange={e => setSerieAlvo(parseInt(e.target.value))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-sm"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-xs"
                 >
+                  <option value={0}>Todos os Anos</option>
                   <option value={1}>1º Ano (2027)</option>
                   <option value={2}>2º Ano (2028)</option>
                   <option value={3}>3º Ano (2029)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Vestibular</label>
+                <select
+                  value={vestibular}
+                  onChange={e => setVestibular(e.target.value as any)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-xs"
+                >
+                  <option value="enem">ENEM</option>
+                  <option value="uece">UECE</option>
                 </select>
               </div>
             </div>

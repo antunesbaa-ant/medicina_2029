@@ -1,7 +1,7 @@
 'use server';
 
 import { db } from '../../db';
-import { acervoArquivos, acervoPaginas, acervoChunks } from '../../db/schema';
+import { acervoArquivos, acervoPaginas, acervoChunks, disciplinas } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { extrairTextoPDF, segmentarTexto, classificarTópicoChunk, gerarMockEmbedding } from '../../lib/ingestion';
 import crypto from 'crypto';
@@ -20,6 +20,7 @@ export async function enviarArquivo(
   titulo: string,
   tipoMaterial: 'livro' | 'apostila' | 'slide' | 'lista_exercicios' | 'anotacao_aula' | 'prova_oficial' | 'resumo_proprio' | 'outro',
   serieAlvo: number,
+  vestibular: string,
   nomeArquivo: string,
   base64Data: string, // Recebe em base64 para facilitar trânsito
   perfilId: string
@@ -63,6 +64,7 @@ export async function enviarArquivo(
         titulo,
         tipoMaterial,
         serieAlvo,
+        vestibular,
         filePath,
         mime: 'application/pdf',
         tamanhoBytes: fileBuffer.length,
@@ -205,4 +207,12 @@ export async function listarArquivosAcervo(disciplinaId?: string) {
     .from(acervoArquivos)
     .where(disciplinaId ? eq(acervoArquivos.disciplinaId, disciplinaId) : undefined)
     .orderBy(acervoArquivos.enviadoEm);
+}
+
+// 5. Obter todas as disciplinas
+export async function listarDisciplinas() {
+  return await db
+    .select({ id: disciplinas.id, nome: disciplinas.nome })
+    .from(disciplinas)
+    .orderBy(disciplinas.ordem);
 }
