@@ -5,6 +5,7 @@ import { acervoArquivos, acervoPaginas, acervoChunks } from '../../db/schema';
 import { eq } from 'drizzle-orm';
 import { extrairTextoPDF, segmentarTexto, classificarTópicoChunk, gerarMockEmbedding } from '../../lib/ingestion';
 import crypto from 'crypto';
+import { uploadToR2 } from '../../lib/r2';
 
 export interface UploadResultado {
   sucesso: boolean;
@@ -44,7 +45,17 @@ export async function enviarArquivo(
     }
 
     // Inserir registro com status inicial 'aguardando'
-    const filePath = `/storage/acervo/${hash}_${nomeArquivo}`;
+    const filePath = `acervo/${hash}_${nomeArquivo}`;
+    
+    // Upload do PDF para o Cloudflare R2 (se credenciais estiverem configuradas)
+    if (process.env.CLOUDFLARE_ACCESS_KEY_ID) {
+      try {
+        await uploadToR2(filePath, fileBuffer, 'application/pdf');
+      } catch (err) {
+        console.error('Falha ao gravar arquivo no Cloudflare R2, continuando pipeline local:', err);
+      }
+    }
+
     const [novoArquivo] = await db
       .insert(acervoArquivos)
       .values({

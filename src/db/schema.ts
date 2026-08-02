@@ -75,6 +75,8 @@ export const perfis = pgTable('perfis', {
   id: uuid('id').primaryKey().defaultRandom(),
   authUserId: uuid('auth_user_id').notNull().unique(),
   nome: varchar('nome', { length: 255 }).notNull(),
+  email: varchar('email', { length: 255 }).unique(),
+  passwordHash: varchar('password_hash', { length: 255 }),
   papel: papelEnum('papel').notNull(),
   criadoEm: timestamp('criado_em').defaultNow().notNull()
 });

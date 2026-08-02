@@ -1,3 +1,6 @@
+import { loadEnvConfig } from '@next/env';
+loadEnvConfig(process.cwd());
+
 import { db, client } from './index';
 import {
   perfis,
@@ -9,6 +12,7 @@ import {
   generos
 } from './schema';
 import { eq } from 'drizzle-orm';
+import bcrypt from 'bcryptjs';
 
 async function main() {
   console.log('Iniciando seed do banco de dados...');
@@ -26,15 +30,23 @@ async function main() {
 
     // 2. Seeding Perfis
     console.log('Seeding Perfis...');
+    const salt = await bcrypt.genSalt(10);
+    const hashEstudante = await bcrypt.hash('senha_estudante_2029', salt);
+    const hashResponsavel = await bcrypt.hash('senha_responsavel_2029', salt);
+
     const [estudante] = await db.insert(perfis).values({
       authUserId: '00000000-0000-0000-0000-000000000001',
       nome: 'Alice Antunes (Estudante)',
+      email: 'alice@medicina2029.com.br',
+      passwordHash: hashEstudante,
       papel: 'estudante'
     }).returning();
 
     const [responsavel] = await db.insert(perfis).values({
       authUserId: '00000000-0000-0000-0000-000000000002',
       nome: 'Bruno (Responsável)',
+      email: 'bruno@medicina2029.com.br',
+      passwordHash: hashResponsavel,
       papel: 'responsavel'
     }).returning();
 

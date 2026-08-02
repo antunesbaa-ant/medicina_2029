@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Poppins, Lora } from "next/font/google";
 import "./globals.css";
+import SessionProviderWrapper from "../components/SessionProviderWrapper";
 
 const poppins = Poppins({
   variable: "--font-poppins",
@@ -31,7 +32,9 @@ export default function RootLayout({
       className={`${poppins.variable} ${lora.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col text-[#1B2A33] font-poppins">
-        {children}
+        <SessionProviderWrapper>
+          {children}
+        </SessionProviderWrapper>
       </body>
     </html>
   );

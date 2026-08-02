@@ -1,0 +1,3002 @@
+{
+  "id": "e30b7dd2-9d4f-48b7-b3e1-50c33d42fa4f",
+  "prevId": "c1396f28-a9fb-47a3-817c-f506c2f1f3dc",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.acervo_arquivos": {
+      "name": "acervo_arquivos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "disciplina_id": {
+          "name": "disciplina_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "titulo": {
+          "name": "titulo",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo_material": {
+          "name": "tipo_material",
+          "type": "tipo_acervo_material_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "autor_fonte": {
+          "name": "autor_fonte",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "serie_alvo": {
+          "name": "serie_alvo",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "file_path": {
+          "name": "file_path",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mime": {
+          "name": "mime",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tamanho_bytes": {
+          "name": "tamanho_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "paginas": {
+          "name": "paginas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enviado_por": {
+          "name": "enviado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "enviado_em": {
+          "name": "enviado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "status_processamento": {
+          "name": "status_processamento",
+          "type": "status_processamento_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'aguardando'"
+        },
+        "erro_processamento": {
+          "name": "erro_processamento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hash_conteudo": {
+          "name": "hash_conteudo",
+          "type": "varchar(64)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "acervo_arquivos_disciplina_id_disciplinas_id_fk": {
+          "name": "acervo_arquivos_disciplina_id_disciplinas_id_fk",
+          "tableFrom": "acervo_arquivos",
+          "tableTo": "disciplinas",
+          "columnsFrom": [
+            "disciplina_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "acervo_arquivos_enviado_por_perfis_id_fk": {
+          "name": "acervo_arquivos_enviado_por_perfis_id_fk",
+          "tableFrom": "acervo_arquivos",
+          "tableTo": "perfis",
+          "columnsFrom": [
+            "enviado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.acervo_chunks": {
+      "name": "acervo_chunks",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "arquivo_id": {
+          "name": "arquivo_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pagina_inicial": {
+          "name": "pagina_inicial",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pagina_final": {
+          "name": "pagina_final",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "texto": {
+          "name": "texto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo_conteudo": {
+          "name": "tipo_conteudo",
+          "type": "tipo_conteudo_chunk_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "topico_id": {
+          "name": "topico_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confianca_classificacao": {
+          "name": "confianca_classificacao",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "embedding": {
+          "name": "embedding",
+          "type": "vector(1536)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tokens": {
+          "name": "tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "acervo_chunks_arquivo_id_acervo_arquivos_id_fk": {
+          "name": "acervo_chunks_arquivo_id_acervo_arquivos_id_fk",
+          "tableFrom": "acervo_chunks",
+          "tableTo": "acervo_arquivos",
+          "columnsFrom": [
+            "arquivo_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "acervo_chunks_topico_id_topicos_id_fk": {
+          "name": "acervo_chunks_topico_id_topicos_id_fk",
+          "tableFrom": "acervo_chunks",
+          "tableTo": "topicos",
+          "columnsFrom": [
+            "topico_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.acervo_figuras": {
+      "name": "acervo_figuras",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "arquivo_id": {
+          "name": "arquivo_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pagina": {
+          "name": "pagina",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bbox": {
+          "name": "bbox",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "imagem_path": {
+          "name": "imagem_path",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "legenda": {
+          "name": "legenda",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "chunk_id": {
+          "name": "chunk_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "acervo_figuras_arquivo_id_acervo_arquivos_id_fk": {
+          "name": "acervo_figuras_arquivo_id_acervo_arquivos_id_fk",
+          "tableFrom": "acervo_figuras",
+          "tableTo": "acervo_arquivos",
+          "columnsFrom": [
+            "arquivo_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "acervo_figuras_chunk_id_acervo_chunks_id_fk": {
+          "name": "acervo_figuras_chunk_id_acervo_chunks_id_fk",
+          "tableFrom": "acervo_figuras",
+          "tableTo": "acervo_chunks",
+          "columnsFrom": [
+            "chunk_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.acervo_paginas": {
+      "name": "acervo_paginas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "arquivo_id": {
+          "name": "arquivo_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "numero": {
+          "name": "numero",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "texto_extraido": {
+          "name": "texto_extraido",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "metodo_extracao": {
+          "name": "metodo_extracao",
+          "type": "metodo_extracao_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confianca_ocr": {
+          "name": "confianca_ocr",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "imagem_path": {
+          "name": "imagem_path",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "acervo_paginas_arquivo_id_acervo_arquivos_id_fk": {
+          "name": "acervo_paginas_arquivo_id_acervo_arquivos_id_fk",
+          "tableFrom": "acervo_paginas",
+          "tableTo": "acervo_arquivos",
+          "columnsFrom": [
+            "arquivo_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.card_revisoes": {
+      "name": "card_revisoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "card_id": {
+          "name": "card_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revisado_em": {
+          "name": "revisado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rating": {
+          "name": "rating",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state_anterior": {
+          "name": "state_anterior",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stability_anterior": {
+          "name": "stability_anterior",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duracao_ms": {
+          "name": "duracao_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "card_revisoes_card_id_cards_id_fk": {
+          "name": "card_revisoes_card_id_cards_id_fk",
+          "tableFrom": "card_revisoes",
+          "tableTo": "cards",
+          "columnsFrom": [
+            "card_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.cards": {
+      "name": "cards",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "perfil_id": {
+          "name": "perfil_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "topico_id": {
+          "name": "topico_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "frente": {
+          "name": "frente",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "verso": {
+          "name": "verso",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "origem": {
+          "name": "origem",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "status_material_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'aprovado'"
+        },
+        "suspenso": {
+          "name": "suspenso",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "fonte_chunk_ids": {
+          "name": "fonte_chunk_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "due": {
+          "name": "due",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stability": {
+          "name": "stability",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "difficulty": {
+          "name": "difficulty",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "elapsed_days": {
+          "name": "elapsed_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "scheduled_days": {
+          "name": "scheduled_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reps": {
+          "name": "reps",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lapses": {
+          "name": "lapses",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_review": {
+          "name": "last_review",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "cards_perfil_id_perfis_id_fk": {
+          "name": "cards_perfil_id_perfis_id_fk",
+          "tableFrom": "cards",
+          "tableTo": "perfis",
+          "columnsFrom": [
+            "perfil_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "cards_topico_id_topicos_id_fk": {
+          "name": "cards_topico_id_topicos_id_fk",
+          "tableFrom": "cards",
+          "tableTo": "topicos",
+          "columnsFrom": [
+            "topico_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.checkins": {
+      "name": "checkins",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "perfil_id": {
+          "name": "perfil_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "name": "data",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "horas_sono": {
+          "name": "horas_sono",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "exercicio_min": {
+          "name": "exercicio_min",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "humor": {
+          "name": "humor",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "energia": {
+          "name": "energia",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nota_livre": {
+          "name": "nota_livre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "checkins_perfil_id_perfis_id_fk": {
+          "name": "checkins_perfil_id_perfis_id_fk",
+          "tableFrom": "checkins",
+          "tableTo": "perfis",
+          "columnsFrom": [
+            "perfil_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.ciclo_blocos": {
+      "name": "ciclo_blocos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "ciclo_id": {
+          "name": "ciclo_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "disciplina_id": {
+          "name": "disciplina_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "tipo_bloco_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estilo_alvo": {
+          "name": "estilo_alvo",
+          "type": "estilo_alvo_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duracao_min": {
+          "name": "duracao_min",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "ciclo_blocos_ciclo_id_ciclos_id_fk": {
+          "name": "ciclo_blocos_ciclo_id_ciclos_id_fk",
+          "tableFrom": "ciclo_blocos",
+          "tableTo": "ciclos",
+          "columnsFrom": [
+            "ciclo_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "ciclo_blocos_disciplina_id_disciplinas_id_fk": {
+          "name": "ciclo_blocos_disciplina_id_disciplinas_id_fk",
+          "tableFrom": "ciclo_blocos",
+          "tableTo": "disciplinas",
+          "columnsFrom": [
+            "disciplina_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.ciclo_estado": {
+      "name": "ciclo_estado",
+      "schema": "",
+      "columns": {
+        "ciclo_id": {
+          "name": "ciclo_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "proxima_ordem": {
+          "name": "proxima_ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "ciclo_estado_ciclo_id_ciclos_id_fk": {
+          "name": "ciclo_estado_ciclo_id_ciclos_id_fk",
+          "tableFrom": "ciclo_estado",
+          "tableTo": "ciclos",
+          "columnsFrom": [
+            "ciclo_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.ciclos": {
+      "name": "ciclos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "nome": {
+          "name": "nome",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ano_letivo": {
+          "name": "ano_letivo",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ativo": {
+          "name": "ativo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "blocos_previstos_semana": {
+          "name": "blocos_previstos_semana",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.curadoria_fila": {
+      "name": "curadoria_fila",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "artefato_tipo": {
+          "name": "artefato_tipo",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "artefato_id": {
+          "name": "artefato_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "topico_id": {
+          "name": "topico_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prioridade": {
+          "name": "prioridade",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "revisado_em": {
+          "name": "revisado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decisao": {
+          "name": "decisao",
+          "type": "decisao_curadoria_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pendente'"
+        },
+        "motivo_rejeicao": {
+          "name": "motivo_rejeicao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "editado": {
+          "name": "editado",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "curadoria_fila_topico_id_topicos_id_fk": {
+          "name": "curadoria_fila_topico_id_topicos_id_fk",
+          "tableFrom": "curadoria_fila",
+          "tableTo": "topicos",
+          "columnsFrom": [
+            "topico_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.disciplinas": {
+      "name": "disciplinas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "nome": {
+          "name": "nome",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "area": {
+          "name": "area",
+          "type": "area_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cor_hex": {
+          "name": "cor_hex",
+          "type": "varchar(7)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.erros": {
+      "name": "erros",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "perfil_id": {
+          "name": "perfil_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "questao_id": {
+          "name": "questao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tentativa_id": {
+          "name": "tentativa_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "descricao_livre": {
+          "name": "descricao_livre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "disciplina_id": {
+          "name": "disciplina_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "topico_id": {
+          "name": "topico_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estilo": {
+          "name": "estilo",
+          "type": "estilo_alvo_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo_erro": {
+          "name": "tipo_erro",
+          "type": "tipo_erro_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conceito_correto": {
+          "name": "conceito_correto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "resolvido_em": {
+          "name": "resolvido_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "vezes_revisado": {
+          "name": "vezes_revisado",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "erros_perfil_id_perfis_id_fk": {
+          "name": "erros_perfil_id_perfis_id_fk",
+          "tableFrom": "erros",
+          "tableTo": "perfis",
+          "columnsFrom": [
+            "perfil_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "erros_questao_id_questoes_id_fk": {
+          "name": "erros_questao_id_questoes_id_fk",
+          "tableFrom": "erros",
+          "tableTo": "questoes",
+          "columnsFrom": [
+            "questao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "erros_tentativa_id_tentativas_id_fk": {
+          "name": "erros_tentativa_id_tentativas_id_fk",
+          "tableFrom": "erros",
+          "tableTo": "tentativas",
+          "columnsFrom": [
+            "tentativa_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "erros_disciplina_id_disciplinas_id_fk": {
+          "name": "erros_disciplina_id_disciplinas_id_fk",
+          "tableFrom": "erros",
+          "tableTo": "disciplinas",
+          "columnsFrom": [
+            "disciplina_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "erros_topico_id_topicos_id_fk": {
+          "name": "erros_topico_id_topicos_id_fk",
+          "tableFrom": "erros",
+          "tableTo": "topicos",
+          "columnsFrom": [
+            "topico_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.generos": {
+      "name": "generos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "nome": {
+          "name": "nome",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "finalidade": {
+          "name": "finalidade",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "interlocutor": {
+          "name": "interlocutor",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estrutura": {
+          "name": "estrutura",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "marcas_linguagem": {
+          "name": "marcas_linguagem",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "erro_que_descaracteriza": {
+          "name": "erro_que_descaracteriza",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ficha_completa": {
+          "name": "ficha_completa",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.geracoes": {
+      "name": "geracoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tipo_artefato": {
+          "name": "tipo_artefato",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "topico_id": {
+          "name": "topico_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "arquivo_ids": {
+          "name": "arquivo_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chunk_ids": {
+          "name": "chunk_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "modelo": {
+          "name": "modelo",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prompt_versao": {
+          "name": "prompt_versao",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "custo_tokens": {
+          "name": "custo_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "iniciada_em": {
+          "name": "iniciada_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "concluida_em": {
+          "name": "concluida_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "itens_gerados": {
+          "name": "itens_gerados",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "itens_aprovados": {
+          "name": "itens_aprovados",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "itens_rejeitados": {
+          "name": "itens_rejeitados",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "geracoes_topico_id_topicos_id_fk": {
+          "name": "geracoes_topico_id_topicos_id_fk",
+          "tableFrom": "geracoes",
+          "tableTo": "topicos",
+          "columnsFrom": [
+            "topico_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.livros": {
+      "name": "livros",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "perfil_id": {
+          "name": "perfil_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "titulo": {
+          "name": "titulo",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "autor": {
+          "name": "autor",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ano_plano": {
+          "name": "ano_plano",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "iniciado_em": {
+          "name": "iniciado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "concluido_em": {
+          "name": "concluido_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "notas": {
+          "name": "notas",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "livros_perfil_id_perfis_id_fk": {
+          "name": "livros_perfil_id_perfis_id_fk",
+          "tableFrom": "livros",
+          "tableTo": "perfis",
+          "columnsFrom": [
+            "perfil_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.materiais": {
+      "name": "materiais",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "topico_id": {
+          "name": "topico_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "titulo": {
+          "name": "titulo",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "corpo": {
+          "name": "corpo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "tipo_material_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tempo_leitura_min": {
+          "name": "tempo_leitura_min",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "status_material_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'rascunho'"
+        },
+        "origem": {
+          "name": "origem",
+          "type": "origem_material_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fonte_chunk_ids": {
+          "name": "fonte_chunk_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "gerado_em": {
+          "name": "gerado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "aprovado_por": {
+          "name": "aprovado_por",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "aprovado_em": {
+          "name": "aprovado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "versao": {
+          "name": "versao",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "materiais_topico_id_topicos_id_fk": {
+          "name": "materiais_topico_id_topicos_id_fk",
+          "tableFrom": "materiais",
+          "tableTo": "topicos",
+          "columnsFrom": [
+            "topico_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "materiais_aprovado_por_perfis_id_fk": {
+          "name": "materiais_aprovado_por_perfis_id_fk",
+          "tableFrom": "materiais",
+          "tableTo": "perfis",
+          "columnsFrom": [
+            "aprovado_por"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.perfis": {
+      "name": "perfis",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "auth_user_id": {
+          "name": "auth_user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "password_hash": {
+          "name": "password_hash",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "papel": {
+          "name": "papel",
+          "type": "papel_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "perfis_auth_user_id_unique": {
+          "name": "perfis_auth_user_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "auth_user_id"
+          ]
+        },
+        "perfis_email_unique": {
+          "name": "perfis_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.perguntas_ativas": {
+      "name": "perguntas_ativas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "topico_id": {
+          "name": "topico_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pergunta": {
+          "name": "pergunta",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resposta": {
+          "name": "resposta",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estilo": {
+          "name": "estilo",
+          "type": "estilo_alvo_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "status_material_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'rascunho'"
+        },
+        "fonte_chunk_ids": {
+          "name": "fonte_chunk_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "perguntas_ativas_topico_id_topicos_id_fk": {
+          "name": "perguntas_ativas_topico_id_topicos_id_fk",
+          "tableFrom": "perguntas_ativas",
+          "tableTo": "topicos",
+          "columnsFrom": [
+            "topico_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.questao_topicos": {
+      "name": "questao_topicos",
+      "schema": "",
+      "columns": {
+        "questao_id": {
+          "name": "questao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "topico_id": {
+          "name": "topico_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "questao_topicos_questao_id_questoes_id_fk": {
+          "name": "questao_topicos_questao_id_questoes_id_fk",
+          "tableFrom": "questao_topicos",
+          "tableTo": "questoes",
+          "columnsFrom": [
+            "questao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "questao_topicos_topico_id_topicos_id_fk": {
+          "name": "questao_topicos_topico_id_topicos_id_fk",
+          "tableFrom": "questao_topicos",
+          "tableTo": "topicos",
+          "columnsFrom": [
+            "topico_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.questoes": {
+      "name": "questoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "procedencia": {
+          "name": "procedencia",
+          "type": "procedencia_questao_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fonte": {
+          "name": "fonte",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ano": {
+          "name": "ano",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fase": {
+          "name": "fase",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "numero": {
+          "name": "numero",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "disciplina_id": {
+          "name": "disciplina_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "estilo": {
+          "name": "estilo",
+          "type": "estilo_alvo_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "dificuldade": {
+          "name": "dificuldade",
+          "type": "varchar(50)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enunciado": {
+          "name": "enunciado",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "alternativas": {
+          "name": "alternativas",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "gabarito": {
+          "name": "gabarito",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resolucao": {
+          "name": "resolucao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "imagem_url": {
+          "name": "imagem_url",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "status_questao_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'rascunho'"
+        },
+        "arquivo_origem_id": {
+          "name": "arquivo_origem_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fonte_chunk_ids": {
+          "name": "fonte_chunk_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "confianca_geracao": {
+          "name": "confianca_geracao",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ativa": {
+          "name": "ativa",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "questoes_disciplina_id_disciplinas_id_fk": {
+          "name": "questoes_disciplina_id_disciplinas_id_fk",
+          "tableFrom": "questoes",
+          "tableTo": "disciplinas",
+          "columnsFrom": [
+            "disciplina_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.redacoes": {
+      "name": "redacoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "perfil_id": {
+          "name": "perfil_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "formato": {
+          "name": "formato",
+          "type": "formato_redacao_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "genero_id": {
+          "name": "genero_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tema": {
+          "name": "tema",
+          "type": "varchar(500)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "escrita_em": {
+          "name": "escrita_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "texto": {
+          "name": "texto",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "arquivo_url": {
+          "name": "arquivo_url",
+          "type": "varchar(1000)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "minutos_gastos": {
+          "name": "minutos_gastos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nota_total": {
+          "name": "nota_total",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "competencias": {
+          "name": "competencias",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "corrigida_por": {
+          "name": "corrigida_por",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reescrita_de_id": {
+          "name": "reescrita_de_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observacoes": {
+          "name": "observacoes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "redacoes_perfil_id_perfis_id_fk": {
+          "name": "redacoes_perfil_id_perfis_id_fk",
+          "tableFrom": "redacoes",
+          "tableTo": "perfis",
+          "columnsFrom": [
+            "perfil_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "redacoes_genero_id_generos_id_fk": {
+          "name": "redacoes_genero_id_generos_id_fk",
+          "tableFrom": "redacoes",
+          "tableTo": "generos",
+          "columnsFrom": [
+            "genero_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.repertorios": {
+      "name": "repertorios",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "referencia": {
+          "name": "referencia",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resumo_2_linhas": {
+          "name": "resumo_2_linhas",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "temas_aplicaveis": {
+          "name": "temas_aplicaveis",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "categoria": {
+          "name": "categoria",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.revisoes_trimestrais": {
+      "name": "revisoes_trimestrais",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "trimestre": {
+          "name": "trimestre",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ano": {
+          "name": "ano",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "aderencia_pct": {
+          "name": "aderencia_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cards_atrasados": {
+          "name": "cards_atrasados",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "media_enem": {
+          "name": "media_enem",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "acerto_uece_pct": {
+          "name": "acerto_uece_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "divergencia_trilhos": {
+          "name": "divergencia_trilhos",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tipo_erro_predominante": {
+          "name": "tipo_erro_predominante",
+          "type": "tipo_erro_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "redacoes_escritas": {
+          "name": "redacoes_escritas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "redacoes_reescritas": {
+          "name": "redacoes_reescritas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "media_sono": {
+          "name": "media_sono",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "conversa": {
+          "name": "conversa",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decisoes": {
+          "name": "decisoes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fechada_em": {
+          "name": "fechada_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sessoes": {
+      "name": "sessoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "perfil_id": {
+          "name": "perfil_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ciclo_bloco_id": {
+          "name": "ciclo_bloco_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "topico_id": {
+          "name": "topico_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "iniciada_em": {
+          "name": "iniciada_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "encerrada_em": {
+          "name": "encerrada_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "segundos_efetivos": {
+          "name": "segundos_efetivos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "segundos_pausa": {
+          "name": "segundos_pausa",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "etapa_atingida": {
+          "name": "etapa_atingida",
+          "type": "etapa_atingida_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "concluida": {
+          "name": "concluida",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "nota_livre": {
+          "name": "nota_livre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sessoes_perfil_id_perfis_id_fk": {
+          "name": "sessoes_perfil_id_perfis_id_fk",
+          "tableFrom": "sessoes",
+          "tableTo": "perfis",
+          "columnsFrom": [
+            "perfil_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sessoes_ciclo_bloco_id_ciclo_blocos_id_fk": {
+          "name": "sessoes_ciclo_bloco_id_ciclo_blocos_id_fk",
+          "tableFrom": "sessoes",
+          "tableTo": "ciclo_blocos",
+          "columnsFrom": [
+            "ciclo_bloco_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "sessoes_topico_id_topicos_id_fk": {
+          "name": "sessoes_topico_id_topicos_id_fk",
+          "tableFrom": "sessoes",
+          "tableTo": "topicos",
+          "columnsFrom": [
+            "topico_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.simulado_analise": {
+      "name": "simulado_analise",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "simulado_id": {
+          "name": "simulado_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "concluida": {
+          "name": "concluida",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "tres_assuntos_fracos": {
+          "name": "tres_assuntos_fracos",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "erros_estrategia": {
+          "name": "erros_estrategia",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "minutos_analise": {
+          "name": "minutos_analise",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "realizada_em": {
+          "name": "realizada_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "simulado_analise_simulado_id_simulados_id_fk": {
+          "name": "simulado_analise_simulado_id_simulados_id_fk",
+          "tableFrom": "simulado_analise",
+          "tableTo": "simulados",
+          "columnsFrom": [
+            "simulado_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.simulado_areas": {
+      "name": "simulado_areas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "simulado_id": {
+          "name": "simulado_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "area": {
+          "name": "area",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "acertos": {
+          "name": "acertos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total": {
+          "name": "total",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nota_estimated": {
+          "name": "nota_estimated",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "simulado_areas_simulado_id_simulados_id_fk": {
+          "name": "simulado_areas_simulado_id_simulados_id_fk",
+          "tableFrom": "simulado_areas",
+          "tableTo": "simulados",
+          "columnsFrom": [
+            "simulado_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.simulado_questoes": {
+      "name": "simulado_questoes",
+      "schema": "",
+      "columns": {
+        "simulado_id": {
+          "name": "simulado_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "questao_id": {
+          "name": "questao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "area": {
+          "name": "area",
+          "type": "varchar(100)",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "simulado_questoes_simulado_id_simulados_id_fk": {
+          "name": "simulado_questoes_simulado_id_simulados_id_fk",
+          "tableFrom": "simulado_questoes",
+          "tableTo": "simulados",
+          "columnsFrom": [
+            "simulado_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "simulado_questoes_questao_id_questoes_id_fk": {
+          "name": "simulado_questoes_questao_id_questoes_id_fk",
+          "tableFrom": "simulado_questoes",
+          "tableTo": "questoes",
+          "columnsFrom": [
+            "questao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.simulados": {
+      "name": "simulados",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "perfil_id": {
+          "name": "perfil_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "formato": {
+          "name": "formato",
+          "type": "formato_simulado_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data": {
+          "name": "data",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "condicoes_reais": {
+          "name": "condicoes_reais",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "duracao_min": {
+          "name": "duracao_min",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "local": {
+          "name": "local",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "composicao_procedencia": {
+          "name": "composicao_procedencia",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "simulados_perfil_id_perfis_id_fk": {
+          "name": "simulados_perfil_id_perfis_id_fk",
+          "tableFrom": "simulados",
+          "tableTo": "perfis",
+          "columnsFrom": [
+            "perfil_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tentativas": {
+      "name": "tentativas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "perfil_id": {
+          "name": "perfil_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "questao_id": {
+          "name": "questao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sessao_id": {
+          "name": "sessao_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "simulado_id": {
+          "name": "simulado_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "alternativa_marcada": {
+          "name": "alternativa_marcada",
+          "type": "varchar(10)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "correta": {
+          "name": "correta",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "segundos": {
+          "name": "segundos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "confianca": {
+          "name": "confianca",
+          "type": "confianca_tentativa_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "tentativas_perfil_id_perfis_id_fk": {
+          "name": "tentativas_perfil_id_perfis_id_fk",
+          "tableFrom": "tentativas",
+          "tableTo": "perfis",
+          "columnsFrom": [
+            "perfil_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tentativas_questao_id_questoes_id_fk": {
+          "name": "tentativas_questao_id_questoes_id_fk",
+          "tableFrom": "tentativas",
+          "tableTo": "questoes",
+          "columnsFrom": [
+            "questao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tentativas_sessao_id_sessoes_id_fk": {
+          "name": "tentativas_sessao_id_sessoes_id_fk",
+          "tableFrom": "tentativas",
+          "tableTo": "sessoes",
+          "columnsFrom": [
+            "sessao_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.topicos": {
+      "name": "topicos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "disciplina_id": {
+          "name": "disciplina_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "varchar(255)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "serie_prevista": {
+          "name": "serie_prevista",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "incidencia_enem": {
+          "name": "incidencia_enem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "incidencia_uece": {
+          "name": "incidencia_uece",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pre_requisito_topico_id": {
+          "name": "pre_requisito_topico_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cobertura_material": {
+          "name": "cobertura_material",
+          "type": "cobertura_material_enum",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'sem_fonte'"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "topicos_disciplina_id_disciplinas_id_fk": {
+          "name": "topicos_disciplina_id_disciplinas_id_fk",
+          "tableFrom": "topicos",
+          "tableTo": "disciplinas",
+          "columnsFrom": [
+            "disciplina_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.area_enum": {
+      "name": "area_enum",
+      "schema": "public",
+      "values": [
+        "linguagens",
+        "humanas",
+        "natureza",
+        "matematica",
+        "redacao"
+      ]
+    },
+    "public.cobertura_material_enum": {
+      "name": "cobertura_material_enum",
+      "schema": "public",
+      "values": [
+        "sem_fonte",
+        "parcial",
+        "coberto"
+      ]
+    },
+    "public.confianca_tentativa_enum": {
+      "name": "confianca_tentativa_enum",
+      "schema": "public",
+      "values": [
+        "certeza",
+        "duvida",
+        "chute"
+      ]
+    },
+    "public.decisao_curadoria_enum": {
+      "name": "decisao_curadoria_enum",
+      "schema": "public",
+      "values": [
+        "pendente",
+        "aprovado",
+        "rejeitado",
+        "editado_e_aprovado"
+      ]
+    },
+    "public.estilo_alvo_enum": {
+      "name": "estilo_alvo_enum",
+      "schema": "public",
+      "values": [
+        "enem",
+        "conteudista",
+        "misto"
+      ]
+    },
+    "public.etapa_atingida_enum": {
+      "name": "etapa_atingida_enum",
+      "schema": "public",
+      "values": [
+        "revisao",
+        "conteudo",
+        "questoes",
+        "registro"
+      ]
+    },
+    "public.formato_redacao_enum": {
+      "name": "formato_redacao_enum",
+      "schema": "public",
+      "values": [
+        "enem",
+        "genero_uece"
+      ]
+    },
+    "public.formato_simulado_enum": {
+      "name": "formato_simulado_enum",
+      "schema": "public",
+      "values": [
+        "enem",
+        "uece_1fase",
+        "uece_2fase",
+        "privada"
+      ]
+    },
+    "public.metodo_extracao_enum": {
+      "name": "metodo_extracao_enum",
+      "schema": "public",
+      "values": [
+        "nativo",
+        "ocr",
+        "visao"
+      ]
+    },
+    "public.origem_material_enum": {
+      "name": "origem_material_enum",
+      "schema": "public",
+      "values": [
+        "manual",
+        "gerado"
+      ]
+    },
+    "public.papel_enum": {
+      "name": "papel_enum",
+      "schema": "public",
+      "values": [
+        "estudante",
+        "responsavel"
+      ]
+    },
+    "public.procedencia_questao_enum": {
+      "name": "procedencia_questao_enum",
+      "schema": "public",
+      "values": [
+        "oficial",
+        "extraida",
+        "gerada"
+      ]
+    },
+    "public.status_material_enum": {
+      "name": "status_material_enum",
+      "schema": "public",
+      "values": [
+        "rascunho",
+        "em_revisao",
+        "aprovado",
+        "rejeitado",
+        "desatualizado"
+      ]
+    },
+    "public.status_processamento_enum": {
+      "name": "status_processamento_enum",
+      "schema": "public",
+      "values": [
+        "aguardando",
+        "extraindo",
+        "segmentando",
+        "classificando",
+        "indexando",
+        "concluido",
+        "falhou"
+      ]
+    },
+    "public.status_questao_enum": {
+      "name": "status_questao_enum",
+      "schema": "public",
+      "values": [
+        "rascunho",
+        "em_revisao",
+        "aprovado",
+        "rejeitado"
+      ]
+    },
+    "public.tipo_acervo_material_enum": {
+      "name": "tipo_acervo_material_enum",
+      "schema": "public",
+      "values": [
+        "livro",
+        "apostila",
+        "slide",
+        "lista_exercicios",
+        "anotacao_aula",
+        "prova_oficial",
+        "resumo_proprio",
+        "outro"
+      ]
+    },
+    "public.tipo_bloco_enum": {
+      "name": "tipo_bloco_enum",
+      "schema": "public",
+      "values": [
+        "conteudo",
+        "questoes",
+        "redacao",
+        "caderno_erros",
+        "revisao_srs",
+        "lingua_estrangeira"
+      ]
+    },
+    "public.tipo_conteudo_chunk_enum": {
+      "name": "tipo_conteudo_chunk_enum",
+      "schema": "public",
+      "values": [
+        "exposicao_teorica",
+        "exemplo_resolvido",
+        "questao",
+        "exercicio",
+        "definicao",
+        "formula",
+        "figura_legenda"
+      ]
+    },
+    "public.tipo_erro_enum": {
+      "name": "tipo_erro_enum",
+      "schema": "public",
+      "values": [
+        "conteudo",
+        "interpretacao",
+        "distracao",
+        "calculo",
+        "tempo"
+      ]
+    },
+    "public.tipo_material_enum": {
+      "name": "tipo_material_enum",
+      "schema": "public",
+      "values": [
+        "resumo",
+        "formulario",
+        "mapa_mental",
+        "esquema"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

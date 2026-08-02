@@ -8,6 +8,13 @@
       "when": 1785577188192,
       "tag": "0000_greedy_loki",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1785662980104,
+      "tag": "0001_dry_talos",
+      "breakpoints": true
     }
   ]
 }
