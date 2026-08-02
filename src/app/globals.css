@@ -143,6 +143,15 @@ main,
 .dark main,
 .dark main.bg-\[\#FBF8F3\] {
   background-color: transparent !important;
+  transition: padding-left 0.3s ease !important;
+}
+
+body.sidebar-collapsed main {
+  padding-left: 4rem !important;
+}
+
+body.sidebar-expanded main {
+  padding-left: 16rem !important;
 }
 
 .font-lora-read {
