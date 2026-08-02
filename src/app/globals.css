@@ -139,7 +139,9 @@ body {
   border-color: #344854 !important;
 }
 
-main {
+main,
+.dark main,
+.dark main.bg-\[\#FBF8F3\] {
   background-color: transparent !important;
 }
 

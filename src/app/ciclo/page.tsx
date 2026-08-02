@@ -8,7 +8,7 @@ export default async function CicloRoute() {
   const cicloAtivoData = await obterCicloAtivo();
 
   return (
-    <main className="flex-1 bg-[#FBF8F3] pl-16 md:pl-64">
+    <main className="flex-1 pl-16 md:pl-64">
       <CicloPage dadosIniciais={cicloAtivoData} />
       <NavBar />
     </main>

@@ -10,7 +10,7 @@ export default async function Home() {
   const metricasData = await obterMetricasDashboard();
 
   return (
-    <main className="flex-1 bg-[#FBF8F3] pl-16 md:pl-64">
+    <main className="flex-1 pl-16 md:pl-64">
       <HojePage dadosIniciais={cicloAtivoData} metricasIniciais={metricasData} />
       <NavBar />
     </main>
