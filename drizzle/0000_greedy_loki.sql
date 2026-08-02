@@ -457,9 +457,4 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;--> statement-breakpoint
-
-CREATE OR REPLACE TRIGGER tr_check_allowlist
-BEFORE INSERT ON auth.users
-FOR EACH ROW
-EXECUTE FUNCTION public.check_allowlist();
+$$ LANGUAGE plpgsql SECURITY DEFINER;
