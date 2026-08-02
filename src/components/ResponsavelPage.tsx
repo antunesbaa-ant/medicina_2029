@@ -3,11 +3,54 @@
 import { useState, useEffect } from 'react';
 import { obterAcompanhamentoQuinzenal, registrarRevisaoTrimestral, obterRevisoesTrimestrais, QuinzenaResumo } from '../app/actions/responsavel';
 import { exportarDadosCompletos, restaurarDadosCompletos } from '../app/actions/backup';
+import { iniciarCicloEstudos, resetarPlanejamento } from '../app/actions/ciclo';
 
 export default function ResponsavelPage() {
   const [quinzenas, setQuinzenas] = useState<QuinzenaResumo[]>([]);
   const [trimestrais, setTrimestrais] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [processandoCiclo, setProcessandoCiclo] = useState<boolean>(false);
+
+  const handleIniciarCiclo = async () => {
+    setProcessandoCiclo(true);
+    setStatusMsg('Iniciando ciclo de estudos...');
+    try {
+      const res = await iniciarCicloEstudos();
+      if (res.sucesso) {
+        setStatusMsg('Ciclo de estudos iniciado com sucesso!');
+        await loadData();
+      } else {
+        setStatusMsg(res.mensagem || 'Falha ao iniciar ciclo de estudos.');
+      }
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Erro ao iniciar ciclo de estudos.');
+    } finally {
+      setProcessandoCiclo(false);
+    }
+  };
+
+  const handleResetarPlanejamento = async () => {
+    if (!confirm('Tem certeza que deseja resetar todo o planejamento? Alice ficará aguardando o início de um novo ciclo.')) {
+      return;
+    }
+    setProcessandoCiclo(true);
+    setStatusMsg('Resetando planejamento...');
+    try {
+      const res = await resetarPlanejamento();
+      if (res.sucesso) {
+        setStatusMsg('Planejamento resetado com sucesso!');
+        await loadData();
+      } else {
+        setStatusMsg(res.mensagem || 'Falha ao resetar planejamento.');
+      }
+    } catch (err) {
+      console.error(err);
+      setStatusMsg('Erro ao resetar planejamento.');
+    } finally {
+      setProcessandoCiclo(false);
+    }
+  };
 
   // Trimestral Form State
   const [showForm, setShowForm] = useState<boolean>(false);
@@ -286,6 +329,32 @@ export default function ResponsavelPage() {
                   </div>
                 </form>
               )}
+            </section>
+
+            {/* Controle do Ciclo de Estudos */}
+            <section className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+              <h3 className="text-base font-bold font-['Lora'] text-[#0E3D4D] border-b pb-2">Controle do Ciclo</h3>
+              <p className="text-xs text-gray-500 leading-relaxed font-medium">
+                Inicie o ciclo de estudos de Alice para 2027 ou resete o planejamento ativo para pausar as atividades diárias.
+              </p>
+              
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleIniciarCiclo}
+                  disabled={processandoCiclo}
+                  className="w-full py-2.5 bg-emerald-600 text-white text-xs font-bold rounded-lg hover:bg-emerald-700 disabled:opacity-50 transition-all text-center font-semibold"
+                >
+                  {processandoCiclo ? 'Processando...' : 'Iniciar Ciclo de Estudos'}
+                </button>
+                
+                <button
+                  onClick={handleResetarPlanejamento}
+                  disabled={processandoCiclo}
+                  className="w-full py-2.5 bg-rose-600 text-white text-xs font-bold rounded-lg hover:bg-rose-700 disabled:opacity-50 transition-all text-center font-semibold"
+                >
+                  {processandoCiclo ? 'Processando...' : 'Resetar Planejamento'}
+                </button>
+              </div>
             </section>
 
             {/* Backup & Export Section */}

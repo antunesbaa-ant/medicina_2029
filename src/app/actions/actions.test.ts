@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { obterCicloAtivo } from './ciclo';
+import { obterCicloAtivo, iniciarCicloEstudos, resetarPlanejamento } from './ciclo';
 import { iniciarSessao, atualizarSessao, concluirSessao } from './sessao';
 
 // Estado global de mocks de consulta
@@ -14,48 +14,58 @@ let updateMockedOutputs: any[] = [];
 
 // Mock da conexão com o banco de dados e do Drizzle ORM
 vi.mock('../../db', () => {
-  return {
-    db: {
-      select: () => {
-        const query: any = {};
-        query.from = vi.fn().mockReturnValue(query);
-        query.where = vi.fn().mockReturnValue(query);
-        query.limit = vi.fn().mockReturnValue(query);
-        query.innerJoin = vi.fn().mockReturnValue(query);
-        query.orderBy = vi.fn().mockReturnValue(query);
-        query.then = (resolve: any) => {
-          const result = selectMockedOutputs[selectCallsCount];
-          selectCallsCount++;
-          return Promise.resolve(result || []).then(resolve);
-        };
-        return query;
-      },
-      insert: () => {
-        const query: any = {};
-        query.values = vi.fn().mockReturnValue(query);
-        query.onConflictDoUpdate = vi.fn().mockReturnValue(query);
-        query.returning = vi.fn().mockReturnValue(query);
-        query.then = (resolve: any) => {
-          const result = insertMockedOutputs[insertCallsCount];
-          insertCallsCount++;
-          return Promise.resolve(result || []).then(resolve);
-        };
-        return query;
-      },
-      update: () => {
-        const query: any = {};
-        query.set = vi.fn().mockReturnValue(query);
-        query.where = vi.fn().mockReturnValue(query);
-        query.returning = vi.fn().mockReturnValue(query);
-        query.then = (resolve: any) => {
-          const result = updateMockedOutputs[updateCallsCount];
-          updateCallsCount++;
-          return Promise.resolve(result || []).then(resolve);
-        };
-        return query;
-      },
+  const mockDb: any = {
+    select: () => {
+      const query: any = {};
+      query.from = vi.fn().mockReturnValue(query);
+      query.where = vi.fn().mockReturnValue(query);
+      query.limit = vi.fn().mockReturnValue(query);
+      query.innerJoin = vi.fn().mockReturnValue(query);
+      query.orderBy = vi.fn().mockReturnValue(query);
+      query.then = (resolve: any) => {
+        const result = selectMockedOutputs[selectCallsCount];
+        selectCallsCount++;
+        return Promise.resolve(result || []).then(resolve);
+      };
+      return query;
     },
+    insert: () => {
+      const query: any = {};
+      query.values = vi.fn().mockReturnValue(query);
+      query.onConflictDoUpdate = vi.fn().mockReturnValue(query);
+      query.returning = vi.fn().mockReturnValue(query);
+      query.then = (resolve: any) => {
+        const result = insertMockedOutputs[insertCallsCount];
+        insertCallsCount++;
+        return Promise.resolve(result || []).then(resolve);
+      };
+      return query;
+    },
+    update: () => {
+      const query: any = {};
+      query.set = vi.fn().mockReturnValue(query);
+      query.where = vi.fn().mockReturnValue(query);
+      query.returning = vi.fn().mockReturnValue(query);
+      query.then = (resolve: any) => {
+        const result = updateMockedOutputs[updateCallsCount];
+        updateCallsCount++;
+        return Promise.resolve(result || []).then(resolve);
+      };
+      return query;
+    },
+    delete: () => {
+      const query: any = {};
+      query.where = vi.fn().mockReturnValue(query);
+      query.then = (resolve: any) => {
+        return Promise.resolve([]).then(resolve);
+      };
+      return query;
+    },
+    transaction: async (callback: any) => {
+      return await callback(mockDb);
+    }
   };
+  return { db: mockDb };
 });
 
 describe('Server Actions - Fase 1', () => {
@@ -114,6 +124,47 @@ describe('Server Actions - Fase 1', () => {
 
       const resultado = await obterCicloAtivo();
       expect(resultado?.proximaOrdem).toBe(1);
+    });
+  });
+
+  describe('iniciarCicloEstudos()', () => {
+    it('deve desativar ciclos anteriores, criar novo ciclo com 28 blocos e iniciar cicloEstado em 1', async () => {
+      const novoCicloMock = { id: 'novo-ciclo-2027', nome: 'Ciclo Principal - 2027', ativo: true };
+      const disciplinasMock = [
+        { id: 'd-mat', nome: 'Matemática', area: 'matematica', corHex: '#C98A2E', ordem: 1 },
+        { id: 'd-bio', nome: 'Biologia', area: 'natureza', corHex: '#0E3D4D', ordem: 2 },
+        { id: 'd-qui', nome: 'Química', area: 'natureza', corHex: '#17607A', ordem: 3 },
+        { id: 'd-fis', nome: 'Física', area: 'natureza', corHex: '#B5502B', ordem: 4 },
+        { id: 'd-red', nome: 'Redação', area: 'redacao', corHex: '#DE6B48', ordem: 5 },
+        { id: 'd-lin', nome: 'Linguagens', area: 'linguagens', corHex: '#7A306C', ordem: 6 },
+        { id: 'd-his', nome: 'História', area: 'humanas', corHex: '#8B575C', ordem: 7 },
+        { id: 'd-geo', nome: 'Geografia', area: 'humanas', corHex: '#3A506B', ordem: 8 },
+        { id: 'd-fil', nome: 'Filosofia', area: 'humanas', corHex: '#5BC0BE', ordem: 9 },
+        { id: 'd-soc', nome: 'Sociologia', area: 'humanas', corHex: '#6FFFE9', ordem: 10 },
+        { id: 'd-ext', nome: 'Língua Estrangeira', area: 'linguagens', corHex: '#48A9A6', ordem: 11 }
+      ];
+
+      insertMockedOutputs = [
+        [novoCicloMock], // Para insert(ciclos)
+      ];
+
+      selectMockedOutputs = [
+        disciplinasMock, // Para select().from(disciplinas)
+      ];
+
+      const res = await iniciarCicloEstudos();
+      expect(res.sucesso).toBe(true);
+      expect(res.cicloId).toBe('novo-ciclo-2027');
+      expect(insertCallsCount).toBe(30); // 1 para ciclo, 28 para blocos, 1 para cicloEstado
+      expect(selectCallsCount).toBe(1); // 1 para disciplinas
+    });
+  });
+
+  describe('resetarPlanejamento()', () => {
+    it('deve desativar todos os ciclos e limpar cicloEstado', async () => {
+      const res = await resetarPlanejamento();
+      expect(res.sucesso).toBe(true);
+      expect(res.mensagem).toContain('resetado com sucesso');
     });
   });
 

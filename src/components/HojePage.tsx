@@ -167,8 +167,34 @@ export default function HojePage({ dadosIniciais, metricasIniciais }: HojePagePr
       </header>
 
       {activeTab === 'hoje' ? (
-        /* Grid responsivo para PC */
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+        !ciclo || !ciclo.ciclo || !ciclo.ciclo.ativo ? (
+          <div className="w-full bg-white border border-[#EAE3D5] rounded-3xl p-8 md:p-12 shadow-sm flex flex-col items-center justify-center text-center space-y-6 max-w-2xl mx-auto my-12 transition-all">
+            {/* Visual element / Icon with premium HSL style */}
+            <div className="w-20 h-20 rounded-full flex items-center justify-center shadow-inner" style={{ backgroundColor: 'hsl(194, 70%, 94%)', color: 'hsl(194, 69%, 18%)' }}>
+              <svg className="w-10 h-10 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+              </svg>
+            </div>
+            
+            <div className="space-y-3">
+              <h2 className="text-2xl md:text-3xl font-bold tracking-tight font-lora-read" style={{ color: 'hsl(194, 69%, 18%)' }}>
+                Aguardando o início do seu ciclo de estudos para 2027!
+              </h2>
+              <p className="text-sm md:text-base max-w-md mx-auto leading-relaxed" style={{ color: 'hsl(201, 15%, 47%)' }}>
+                Seu planejamento de estudos está sendo estruturado para garantir a melhor jornada de aprendizado. Assim que for iniciado pelo seu responsável, você verá seus blocos diários de foco aqui.
+              </p>
+            </div>
+
+            <div className="pt-4 w-full max-w-xs">
+              <div className="bg-[#FBF8F3] border border-[#EAE3D5] rounded-2xl p-4 text-xs font-medium" style={{ color: 'hsl(201, 15%, 35%)' }}>
+                <span className="block font-bold mb-1" style={{ color: 'hsl(194, 69%, 18%)' }}>Dica de Preparação</span>
+                Aproveite este momento para organizar seu ambiente de estudos e revisar suas metas qualitativas.
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Grid responsivo para PC */
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
         
         {/* Coluna Esquerda: Bloco de Foco e Status (md:col-span-7) */}
         <div className="md:col-span-7 space-y-5">
@@ -435,6 +461,7 @@ export default function HojePage({ dadosIniciais, metricasIniciais }: HojePagePr
         </div>
 
       </div>
+        )
       ) : (
         <div className="mt-4">
           <DashboardPage dadosIniciais={metricasIniciais} embedded={true} />
