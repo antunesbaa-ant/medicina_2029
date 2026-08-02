@@ -20,30 +20,16 @@ export interface ArtefatosGerados {
   }>;
 }
 
-// 1. Função de chamada à API do Claude (com mock determinístico inteligente como fallback)
-export async function gerarArtefatosClaudeComFallback(
+// 1. Função de chamada à API do Gemini (com mock determinístico inteligente como fallback)
+export async function gerarArtefatosGeminiComFallback(
   conteudoTexto: string,
   topicoNome: string
 ): Promise<ArtefatosGerados> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY;
 
   if (apiKey) {
     try {
-      // Integração real simplificada com a API da Anthropic
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: 'claude-3-5-sonnet-20241022',
-          max_tokens: 4000,
-          messages: [
-            {
-              role: 'user',
-              content: `Você é um gerador de materiais didáticos de medicina. Com base no texto a seguir, gere:
+      const prompt = `Você é um gerador de materiais didáticos de medicina. Com base no texto a seguir, gere:
 1. Um resumo estruturado sobre o tópico "${topicoNome}".
 2. 3 flashcards (pergunta e resposta ativa).
 3. 2 questões de múltipla escolha (A, B, C, D, E) com enunciado, gabarito e resolução comentada.
@@ -55,19 +41,42 @@ Retorne EXCLUSIVAMENTE em formato JSON puro, seguindo este esquema exato:
   "questoes": [ { "enunciado": "...", "alternativas": [ {"letra": "A", "texto": "..."}, ... ], "gabarito": "A", "resolucao": "..." } ]
 }
 
-Texto base:\n${conteudoTexto}`
+Texto base:\n${conteudoTexto}`;
+
+      // Usando a API do Gemini 2.5 Flash nativa via fetch (compatível com a infraestrutura Google/Antigravity)
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: prompt
+                  }
+                ]
+              }
+            ],
+            generationConfig: {
+              responseMimeType: 'application/json'
             }
-          ]
-        })
-      });
+          })
+        }
+      );
 
       if (response.ok) {
         const data = await response.json();
-        const jsonText = data.content[0].text;
+        const jsonText = data.candidates[0].content.parts[0].text;
         return JSON.parse(jsonText);
+      } else {
+        console.warn('Erro na resposta do Gemini API:', response.statusText);
       }
     } catch (e) {
-      console.warn('Falha na chamada da API real do Claude. Usando gerador alternutivo inteligente.');
+      console.warn('Falha na chamada da API real do Gemini. Usando gerador alternutivo inteligente.', e);
     }
   }
 

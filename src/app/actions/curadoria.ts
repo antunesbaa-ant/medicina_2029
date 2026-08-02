@@ -13,7 +13,7 @@ import {
   cards
 } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { gerarArtefatosClaudeComFallback } from '../../lib/claude';
+import { gerarArtefatosGeminiComFallback } from '../../lib/gemini';
 
 // 1. Enfileirar Geração de Artefatos a partir do Arquivo
 export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{ sucesso: boolean; mensagem: string }> {
@@ -48,9 +48,9 @@ export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{
       }
     }
 
-    // 3. Para cada tópico, gera os artefatos com Claude
+    // 3. Para cada tópico, gera os artefatos com Gemini (Antigravity engine)
     for (const [topicoId, data] of chunksPorTopico.entries()) {
-      const artefatos = await gerarArtefatosClaudeComFallback(data.texto, data.topicoNome);
+      const artefatos = await gerarArtefatosGeminiComFallback(data.texto, data.topicoNome);
 
       // A. Gravar Resumo
       const [resumo] = await db
