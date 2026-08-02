@@ -1,0 +1,8 @@
+# Project Rules & Workflows
+
+## Git Workflows
+- **Automatic Commits and Pushes**: Whenever the user requests any modification to the system/codebase:
+  1. Stage the changes: `git add .`
+  2. Commit the changes locally with a clear semantic commit message (e.g., `feat: ...`, `fix: ...`, `refactor: ...`).
+  3. Push to the remote repository: `git push origin main` (or the active branch).
+  4. Provide feedback to the user containing the list of modified files, the commit hash, and the confirmation of the push.
