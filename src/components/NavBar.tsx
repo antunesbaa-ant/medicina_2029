@@ -294,7 +294,12 @@ export default function NavBar() {
         </svg>
       ),
     },
-  ];
+  ].filter(item => {
+    if (['/acervo', '/curadoria', '/responsavel'].includes(item.path)) {
+      return userRole === 'responsavel';
+    }
+    return true;
+  });
 
   return (
     <nav className={`fixed top-0 left-0 bottom-0 z-40 bg-[#FBF8F3] dark:bg-[#0A1114] border-r border-[#EAE3D5] dark:border-[#1E2C33] shadow-lg flex flex-col justify-between transition-all duration-300 py-6 ${isCollapsed ? 'w-16' : 'w-64'}`}>
