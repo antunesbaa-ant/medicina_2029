@@ -3,12 +3,25 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useSession, signOut } from 'next-auth/react';
 
 export default function NavBar() {
   const pathname = usePathname();
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [mounted, setMounted] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const { data: session } = useSession();
+  
+  const userName = session?.user?.name || 'Estudante';
+  const userRole = (session?.user as any)?.role || 'estudante';
+  
+  const iniciais = userName
+    .split(' ')
+    .filter(Boolean)
+    .map((n) => n[0])
+    .join('')
+    .substring(0, 2)
+    .toUpperCase() || 'U';
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | null;
@@ -359,52 +372,90 @@ export default function NavBar() {
 
       {/* Footer Profile Info */}
       <div className="px-3 md:px-6 mt-auto">
-        <div className="flex items-center justify-center md:justify-start mb-2 relative group/theme">
-          <button
-            onClick={toggleTheme}
-            className={`flex items-center justify-center rounded-xl border border-[#EAE3D5] bg-[#F1EFEA] dark:border-[#1E2C33] dark:bg-[#15222B] text-[#6A7D87] hover:text-[#0E3D4D] dark:text-gray-400 dark:hover:text-white transition-all cursor-pointer shadow-sm hover:scale-[1.02] active:scale-[0.98] min-h-[40px] ${
-              isCollapsed ? 'w-10 h-10' : 'w-full px-3 py-2'
-            }`}
-            title="Alternar tema"
-          >
-            {!mounted ? (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
-                </svg>
-                {!isCollapsed && <span className="text-xs font-semibold ml-2">Modo Escuro</span>}
-              </>
-            ) : theme === 'dark' ? (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-amber-500">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
-                </svg>
-                {!isCollapsed && <span className="text-xs font-semibold ml-2">Modo Claro</span>}
-              </>
-            ) : (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-[#0E3D4D]">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
-                </svg>
-                {!isCollapsed && <span className="text-xs font-semibold ml-2">Modo Escuro</span>}
-              </>
+        <div className={`flex ${isCollapsed ? 'flex-col' : 'flex-row'} gap-2 mb-2 relative`}>
+          {/* Theme Button */}
+          <div className="flex-1 relative group/theme">
+            <button
+              onClick={toggleTheme}
+              className={`flex items-center justify-center rounded-xl border border-[#EAE3D5] bg-[#F1EFEA] dark:border-[#1E2C33] dark:bg-[#15222B] text-[#6A7D87] hover:text-[#0E3D4D] dark:text-gray-400 dark:hover:text-white transition-all cursor-pointer shadow-sm hover:scale-[1.02] active:scale-[0.98] min-h-[40px] w-full px-3 py-2`}
+              title="Alternar tema"
+            >
+              {!mounted ? (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+                  </svg>
+                  {!isCollapsed && <span className="text-xs font-semibold ml-2">Escuro</span>}
+                </>
+              ) : theme === 'dark' ? (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-amber-500">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
+                  </svg>
+                  {!isCollapsed && <span className="text-xs font-semibold ml-2">Claro</span>}
+                </>
+              ) : (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5 text-[#0E3D4D]">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
+                  </svg>
+                  {!isCollapsed && <span className="text-xs font-semibold ml-2">Escuro</span>}
+                </>
+              )}
+            </button>
+            {isCollapsed && (
+              <div className="absolute left-full top-0 ml-4 px-2.5 py-1.5 bg-[#0E3D4D] text-white text-[10px] font-bold rounded-lg opacity-0 invisible group-hover/theme:opacity-100 group-hover/theme:visible transition-all duration-200 whitespace-nowrap z-50 shadow-md pointer-events-none">
+                Alternar tema
+              </div>
             )}
-          </button>
-          {isCollapsed && (
-            <div className="absolute left-full ml-4 px-2.5 py-1.5 bg-[#0E3D4D] text-white text-[10px] font-bold rounded-lg opacity-0 invisible group-hover/theme:opacity-100 group-hover/theme:visible transition-all duration-200 whitespace-nowrap z-50 shadow-md pointer-events-none">
-              Alternar tema
-            </div>
-          )}
+          </div>
+
+          {/* Sair Button */}
+          <div className="relative group/logout">
+            <button
+              onClick={() => signOut({ callbackUrl: '/login' })}
+              className={`flex items-center justify-center rounded-xl border border-[#EAE3D5] bg-[#F1EFEA] dark:border-[#1E2C33] dark:bg-[#15222B] text-[#6A7D87] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all cursor-pointer shadow-sm hover:scale-[1.02] active:scale-[0.98] min-h-[40px] ${
+                isCollapsed ? 'w-10 h-10' : 'px-3 py-2'
+              }`}
+              title="Sair do sistema"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                strokeWidth={2}
+                stroke="currentColor"
+                className="w-5 h-5"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
+                />
+              </svg>
+              {!isCollapsed && <span className="text-xs font-semibold ml-2">Sair</span>}
+            </button>
+            {isCollapsed && (
+              <div className="absolute left-full top-0 ml-4 px-2.5 py-1.5 bg-[#0E3D4D] text-white text-[10px] font-bold rounded-lg opacity-0 invisible group-hover/logout:opacity-100 group-hover/logout:visible transition-all duration-200 whitespace-nowrap z-50 shadow-md pointer-events-none">
+                Sair do sistema
+              </div>
+            )}
+          </div>
         </div>
+
         <div className="h-[1px] bg-[#EAE3D5] dark:bg-[#1E2C33] my-4" />
+        
+        {/* Profile Avatar and Name */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-[#B5502B]/10 border border-[#B5502B]/30 flex items-center justify-center font-bold text-xs text-[#B5502B] uppercase shadow-inner shrink-0">
-            AA
+          <div className="w-10 h-10 rounded-full bg-[#B5502B]/10 border border-[#B5502B]/30 flex items-center justify-center font-bold text-xs text-[#B5502B] uppercase shadow-inner shrink-0" title={userName}>
+            {iniciais}
           </div>
           {!isCollapsed && (
             <div className="truncate">
-              <h4 className="text-xs font-bold text-[#0E3D4D] dark:text-white truncate leading-snug">Alice Antunes</h4>
-              <span className="text-[10px] text-gray-400 block truncate">Estudante</span>
+              <h4 className="text-xs font-bold text-[#0E3D4D] dark:text-white truncate leading-snug">{userName}</h4>
+              <span className="text-[10px] text-gray-400 block truncate uppercase tracking-wider font-semibold">
+                {userRole === 'responsavel' ? 'Responsável' : 'Estudante'}
+              </span>
             </div>
           )}
         </div>
