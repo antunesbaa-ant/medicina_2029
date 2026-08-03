@@ -44,6 +44,7 @@ describe('Acervo e Ingestão - Server Actions', () => {
         'Livro Teste',
         'livro',
         1,
+        'enem',
         'teste.pdf',
         Buffer.from('dummy').toString('base64'),
         'perfil-1'

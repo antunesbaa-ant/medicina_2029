@@ -9,6 +9,9 @@ interface SlideData {
   badge: string;
   color: string;
   bgColor: string;
+  textClass: string;
+  bgClass: string;
+  borderClass: string;
   description: string;
   details: string[];
   tips: string;
@@ -25,6 +28,9 @@ export default function ComoUsarPage() {
       title: 'Bem-vinda à sua Jornada Medicina 2029!',
       color: 'hsl(194, 69%, 18%)',
       bgColor: 'hsl(194, 70%, 95%)',
+      textClass: 'text-[#0E3D4D] dark:text-[#7DD3FC]',
+      bgClass: 'bg-[#E0EBF0] dark:bg-[#0E3D4D]/30',
+      borderClass: 'border-[#0E3D4D]/20 dark:border-[#7DD3FC]/30',
       description: 'Este sistema foi projetado sob medida para o seu sucesso no ENEM e UECE, utilizando os métodos de estudo cientificamente mais eficazes do mundo: Recuperação Ativa e Repetição Espaçada.',
       details: [
         'Aprenda ativamente em vez de apenas ler passivamente.',
@@ -44,6 +50,9 @@ export default function ComoUsarPage() {
       title: 'O Começo do Dia: Check-in de Saúde',
       color: 'hsl(145, 63%, 20%)',
       bgColor: 'hsl(145, 65%, 95%)',
+      textClass: 'text-[#1B4D3E] dark:text-[#86EFAC]',
+      bgClass: 'bg-[#E8F5E9] dark:bg-[#1B4D3E]/30',
+      borderClass: 'border-[#1B4D3E]/20 dark:border-[#86EFAC]/30',
       description: 'Seu cérebro depende do seu corpo. Todos os dias, antes de iniciar os blocos, você preencherá um rápido questionário sobre a qualidade da sua rotina.',
       details: [
         'Horas de Sono: Dormir bem consolida as memórias do dia anterior.',
@@ -63,6 +72,9 @@ export default function ComoUsarPage() {
       title: 'O Bloco de Estudo de 50 Minutos',
       color: 'hsl(28, 70%, 25%)',
       bgColor: 'hsl(28, 70%, 95%)',
+      textClass: 'text-[#A0522D] dark:text-[#FDBA74]',
+      bgClass: 'bg-[#FFF3E0] dark:bg-[#A0522D]/30',
+      borderClass: 'border-[#A0522D]/20 dark:border-[#FDBA74]/30',
       description: 'Seus estudos são divididos em sessões de alta performance de 50 minutos cronometrados no sistema. A sessão segue uma divisão estrita de foco:',
       details: [
         'Minuto 00 ao 30 (Foco Total): Leitura ativa do material no acervo, marcação ou aula teórica.',
@@ -82,6 +94,9 @@ export default function ComoUsarPage() {
       title: 'Caderno de Erros: O Caminho da Aprovação',
       color: 'hsl(7, 65%, 25%)',
       bgColor: 'hsl(7, 70%, 96%)',
+      textClass: 'text-[#8B2500] dark:text-[#FCA5A5]',
+      bgClass: 'bg-[#FFEBEE] dark:bg-[#8B2500]/30',
+      borderClass: 'border-[#8B2500]/20 dark:border-[#FCA5A5]/30',
       description: 'O segredo para passar em medicina é errar no treino para acertar no jogo. Sempre que resolver listas de questões ou simulados, registre seus erros no sistema.',
       details: [
         'Cadastre a questão exata, a alternativa correta e a que você marcou.',
@@ -101,6 +116,9 @@ export default function ComoUsarPage() {
       title: 'Revisão Espaçada Ativa (Anki/FSRS)',
       color: 'hsl(280, 50%, 25%)',
       bgColor: 'hsl(280, 55%, 96%)',
+      textClass: 'text-[#5D3FD3] dark:text-[#D8B4FE]',
+      bgClass: 'bg-[#F3E5F5] dark:bg-[#5D3FD3]/30',
+      borderClass: 'border-[#5D3FD3]/20 dark:border-[#D8B4FE]/30',
       description: 'Para não esquecer em Novembro o que aprendeu em Março, revisamos usando Flashcards. Ao responder a pergunta do card, escolha honestamente o grau de dificuldade:',
       details: [
         'ERREI: O assunto sumiu da cabeça. O card volta a aparecer em poucos minutos.',
@@ -121,6 +139,9 @@ export default function ComoUsarPage() {
       title: 'Redação: Nota 1000 no ENEM e UECE',
       color: 'hsl(340, 60%, 25%)',
       bgColor: 'hsl(340, 65%, 96%)',
+      textClass: 'text-[#9F2B68] dark:text-[#FBCFE8]',
+      bgClass: 'bg-[#FCE4EC] dark:bg-[#9F2B68]/30',
+      borderClass: 'border-[#9F2B68]/20 dark:border-[#FBCFE8]/30',
       description: 'A redação garante 20% da sua nota final. Escreva à mão na folha de redação, digite o seu rascunho no sistema e utilize a inteligência artificial para:',
       details: [
         'Corrigir desvios gramaticais e de coesão textual.',
@@ -152,21 +173,21 @@ export default function ComoUsarPage() {
   const slide = slides[currentSlide];
 
   return (
-    <div className="w-full max-w-4xl mx-auto px-4 py-8 pb-24 font-['Poppins'] text-[#1B2A33]">
+    <div className="w-full max-w-4xl mx-auto px-4 py-8 pb-24 font-['Poppins'] text-[#1B2A33] dark:text-gray-100">
       {/* Header */}
-      <header className="border-b pb-6 mb-8 text-center md:text-left">
-        <h1 className="text-3xl font-bold font-['Lora'] text-[#0E3D4D]">Como Usar o Sistema</h1>
-        <p className="text-sm text-gray-500 mt-1">
+      <header className="border-b dark:border-gray-800 pb-6 mb-8 text-center md:text-left">
+        <h1 className="text-3xl font-bold font-['Lora'] text-[#0E3D4D] dark:text-[#E2E8F0]">Como Usar o Sistema</h1>
+        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
           Guia de bordo passo a passo para extrair a máxima performance da sua rotina de estudos.
         </p>
       </header>
 
       {/* Interactive Carousel */}
-      <div className="bg-white border border-[#EAE3D5] rounded-3xl p-6 md:p-10 shadow-lg shadow-[#0E3D4D]/5 transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[500px]">
+      <div className="bg-white dark:bg-[#111C24] border border-[#EAE3D5] dark:border-gray-800 rounded-3xl p-6 md:p-10 shadow-lg shadow-[#0E3D4D]/5 transition-all duration-300 relative overflow-hidden flex flex-col justify-between min-h-[500px]">
         {/* Decorative Background Badge */}
         <div 
-          className="absolute -right-8 -top-8 w-32 h-32 rounded-full opacity-10 flex items-center justify-center font-bold text-5xl"
-          style={{ backgroundColor: slide.color, color: '#FFFFFF' }}
+          className="absolute -right-8 -top-8 w-32 h-32 rounded-full opacity-10 flex items-center justify-center font-bold text-5xl text-white"
+          style={{ backgroundColor: slide.color }}
         >
           {slide.step}
         </div>
@@ -175,43 +196,40 @@ export default function ComoUsarPage() {
         <div className="space-y-6">
           <div className="flex items-center gap-3">
             <span 
-              className="text-[10px] font-bold px-3 py-1 rounded-full border"
-              style={{ backgroundColor: slide.bgColor, borderColor: slide.color, color: slide.color }}
+              className={`text-[10px] font-bold px-3 py-1 rounded-full border ${slide.bgClass} ${slide.borderClass} ${slide.textClass}`}
             >
               {slide.badge}
             </span>
-            <span className="text-xs font-bold text-gray-400">Etapa {slide.step} de 06</span>
+            <span className="text-xs font-bold text-gray-400 dark:text-gray-500">Etapa {slide.step} de 06</span>
           </div>
 
           <div className="flex flex-col md:flex-row gap-6 items-start">
             {/* Slide Icon */}
             <div 
-              className="p-4 rounded-2xl shadow-md shrink-0 flex items-center justify-center"
-              style={{ backgroundColor: slide.bgColor, color: slide.color }}
+              className={`p-4 rounded-2xl shadow-md shrink-0 flex items-center justify-center ${slide.bgClass} ${slide.textClass}`}
             >
               {slide.icon}
             </div>
 
             <div className="space-y-3 flex-1">
               <h2 
-                className="text-xl md:text-2xl font-bold font-['Lora']"
-                style={{ color: slide.color }}
+                className={`text-xl md:text-2xl font-bold font-['Lora'] ${slide.textClass}`}
               >
                 {slide.title}
               </h2>
-              <p className="text-sm text-gray-600 leading-relaxed font-medium">
+              <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed font-medium">
                 {slide.description}
               </p>
             </div>
           </div>
 
           {/* Details list */}
-          <div className="bg-[#FBF8F3] rounded-2xl p-5 border border-[#EAE3D5]/60">
-            <h3 className="text-xs font-bold text-[#0E3D4D] uppercase tracking-wider mb-3">Pontos Fundamentais:</h3>
+          <div className="bg-[#FBF8F3] dark:bg-[#1B2A33] rounded-2xl p-5 border border-[#EAE3D5]/60 dark:border-gray-800">
+            <h3 className="text-xs font-bold text-[#0E3D4D] dark:text-[#E0EBF0] uppercase tracking-wider mb-3">Pontos Fundamentais:</h3>
             <ul className="space-y-2.5">
               {slide.details.map((d, index) => (
-                <li key={index} className="flex gap-3 text-xs text-gray-700 font-medium leading-relaxed">
-                  <span className="text-[#B5502B] font-bold text-sm shrink-0">✓</span>
+                <li key={index} className="flex gap-3 text-xs text-gray-700 dark:text-gray-300 font-medium leading-relaxed">
+                  <span className="text-[#B5502B] dark:text-[#E07A5F] font-bold text-sm shrink-0">✓</span>
                   <span>{d}</span>
                 </li>
               ))}
@@ -220,10 +238,10 @@ export default function ComoUsarPage() {
         </div>
 
         {/* Action controls & Footer */}
-        <div className="mt-8 pt-6 border-t border-[#EAE3D5] flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="mt-8 pt-6 border-t border-[#EAE3D5] dark:border-gray-800 flex flex-col md:flex-row items-center justify-between gap-4">
           {/* Tip container */}
-          <div className="flex-1 flex gap-2 items-start text-[11px] text-gray-500 font-['Lora'] italic leading-relaxed">
-            <span className="text-[#B5502B] font-bold not-italic">💡 Dica:</span>
+          <div className="flex-1 flex gap-2 items-start text-[11px] text-gray-500 dark:text-gray-400 font-['Lora'] italic leading-relaxed">
+            <span className="text-[#B5502B] dark:text-[#E07A5F] font-bold not-italic">💡 Dica:</span>
             <span>{slide.tips}</span>
           </div>
 
@@ -232,7 +250,7 @@ export default function ComoUsarPage() {
             <button
               onClick={prevSlide}
               disabled={currentSlide === 0}
-              className="px-4 py-2 border border-gray-300 rounded-xl text-xs font-semibold text-gray-600 bg-white hover:bg-gray-50 transition-all disabled:opacity-30 disabled:hover:bg-white cursor-pointer"
+              className="px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-400 bg-white dark:bg-[#1B2A33] hover:bg-gray-50 dark:hover:bg-[#253540] transition-all disabled:opacity-30 disabled:hover:bg-white dark:disabled:hover:bg-[#1B2A33] cursor-pointer"
             >
               Anterior
             </button>
@@ -240,7 +258,7 @@ export default function ComoUsarPage() {
             {currentSlide < slides.length - 1 ? (
               <button
                 onClick={nextSlide}
-                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-[#0E3D4D] hover:bg-[#17607A] transition-all shadow-md shadow-[#0E3D4D]/15 active:scale-95 cursor-pointer"
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-[#0E3D4D] dark:bg-[#17607A] hover:bg-[#17607A] dark:hover:bg-[#0E3D4D] transition-all shadow-md shadow-[#0E3D4D]/15 active:scale-95 cursor-pointer"
               >
                 Próximo
               </button>
@@ -263,7 +281,7 @@ export default function ComoUsarPage() {
             key={index}
             onClick={() => setCurrentSlide(index)}
             className={`w-2.5 h-2.5 rounded-full transition-all cursor-pointer ${
-              index === currentSlide ? 'bg-[#0E3D4D] w-6' : 'bg-gray-300'
+              index === currentSlide ? 'bg-[#0E3D4D] dark:bg-[#38BDF8] w-6' : 'bg-gray-300 dark:bg-gray-700'
             }`}
             title={`Ir para etapa ${index + 1}`}
           />
