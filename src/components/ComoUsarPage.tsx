@@ -173,7 +173,7 @@ export default function ComoUsarPage() {
   const slide = slides[currentSlide];
 
   return (
-    <div className="w-full max-w-4xl mx-auto px-4 py-8 pb-24 font-['Poppins'] text-[#1B2A33] dark:text-gray-100">
+    <div className="w-full max-w-6xl mx-auto px-4 py-8 pb-24 font-['Poppins'] text-[#1B2A33] dark:text-gray-100">
       {/* Header */}
       <header className="border-b dark:border-gray-800 pb-6 mb-8 text-center md:text-left">
         <h1 className="text-3xl font-bold font-['Lora'] text-[#0E3D4D] dark:text-[#E2E8F0]">Como Usar o Sistema</h1>
@@ -213,23 +213,23 @@ export default function ComoUsarPage() {
 
             <div className="space-y-3 flex-1">
               <h2 
-                className={`text-xl md:text-2xl font-bold font-['Lora'] ${slide.textClass}`}
+                className={`text-2xl md:text-3xl font-bold font-['Lora'] leading-snug ${slide.textClass}`}
               >
                 {slide.title}
               </h2>
-              <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed font-medium">
+              <p className="text-sm md:text-base text-gray-600 dark:text-gray-300 leading-relaxed font-medium">
                 {slide.description}
               </p>
             </div>
           </div>
 
           {/* Details list */}
-          <div className="bg-[#FBF8F3] dark:bg-[#1B2A33] rounded-2xl p-5 border border-[#EAE3D5]/60 dark:border-gray-800">
-            <h3 className="text-xs font-bold text-[#0E3D4D] dark:text-[#E0EBF0] uppercase tracking-wider mb-3">Pontos Fundamentais:</h3>
-            <ul className="space-y-2.5">
+          <div className="bg-[#FBF8F3] dark:bg-[#1B2A33] rounded-2xl p-6 border border-[#EAE3D5]/60 dark:border-gray-800">
+            <h3 className="text-xs md:text-sm font-bold text-[#0E3D4D] dark:text-[#E0EBF0] uppercase tracking-wider mb-3">Pontos Fundamentais:</h3>
+            <ul className="space-y-3">
               {slide.details.map((d, index) => (
-                <li key={index} className="flex gap-3 text-xs text-gray-700 dark:text-gray-300 font-medium leading-relaxed">
-                  <span className="text-[#B5502B] dark:text-[#E07A5F] font-bold text-sm shrink-0">✓</span>
+                <li key={index} className="flex gap-3 text-xs md:text-sm text-gray-700 dark:text-gray-300 font-medium leading-relaxed">
+                  <span className="text-[#B5502B] dark:text-[#E07A5F] font-bold text-base shrink-0">✓</span>
                   <span>{d}</span>
                 </li>
               ))}
@@ -240,8 +240,8 @@ export default function ComoUsarPage() {
         {/* Action controls & Footer */}
         <div className="mt-8 pt-6 border-t border-[#EAE3D5] dark:border-gray-800 flex flex-col md:flex-row items-center justify-between gap-4">
           {/* Tip container */}
-          <div className="flex-1 flex gap-2 items-start text-[11px] text-gray-500 dark:text-gray-400 font-['Lora'] italic leading-relaxed">
-            <span className="text-[#B5502B] dark:text-[#E07A5F] font-bold not-italic">💡 Dica:</span>
+          <div className="flex-1 flex gap-2 items-start text-xs md:text-sm text-gray-500 dark:text-gray-400 font-['Lora'] italic leading-relaxed">
+            <span className="text-[#B5502B] dark:text-[#E07A5F] font-bold not-italic shrink-0">💡 Dica:</span>
             <span>{slide.tips}</span>
           </div>
 
