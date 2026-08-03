@@ -19,9 +19,10 @@ interface SlideData {
 }
 
 export default function ComoUsarPage() {
+  const [activeTab, setActiveTab] = useState<'estudante' | 'responsavel'>('estudante');
   const [currentSlide, setCurrentSlide] = useState(0);
 
-  const slides: SlideData[] = [
+  const slidesEstudante: SlideData[] = [
     {
       step: '01',
       badge: 'BEM-VINDA',
@@ -116,9 +117,9 @@ export default function ComoUsarPage() {
       title: 'Revisão Espaçada Ativa (Anki/FSRS)',
       color: 'hsl(280, 50%, 25%)',
       bgColor: 'hsl(280, 55%, 96%)',
-      textClass: 'text-[#5D3FD3] dark:text-[#D8B4FE]',
-      bgClass: 'bg-[#F3E5F5] dark:bg-[#5D3FD3]/30',
-      borderClass: 'border-[#5D3FD3]/20 dark:border-[#D8B4FE]/30',
+      textClass: 'text-[#5E3A8C] dark:text-[#D8B4FE]',
+      bgClass: 'bg-[#F3E5F5] dark:bg-[#5E3A8C]/30',
+      borderClass: 'border-[#5E3A8C]/20 dark:border-[#D8B4FE]/30',
       description: 'Para não esquecer em Novembro o que aprendeu em Março, revisamos usando Flashcards. Ao responder a pergunta do card, escolha honestamente o grau de dificuldade:',
       details: [
         'ERREI: O assunto sumiu da cabeça. O card volta a aparecer em poucos minutos.',
@@ -158,8 +159,109 @@ export default function ComoUsarPage() {
     }
   ];
 
+  const slidesResponsavel: SlideData[] = [
+    {
+      step: '01',
+      badge: 'PASSO 1',
+      title: 'Alimentar o Acervo de Estudos',
+      color: 'hsl(194, 69%, 18%)',
+      bgColor: 'hsl(194, 70%, 95%)',
+      textClass: 'text-[#0E3D4D] dark:text-[#7DD3FC]',
+      bgClass: 'bg-[#E0EBF0] dark:bg-[#0E3D4D]/30',
+      borderClass: 'border-[#0E3D4D]/20 dark:border-[#7DD3FC]/30',
+      description: 'O primeiro passo antes de tudo é alimentar o sistema. Você deve cadastrar livros, apostilas e listas de questões em PDF para criar a base didática da estudante.',
+      details: [
+        'Acesse a tela do "Acervo" e preencha os dados (Título, Tipo de Material).',
+        'Selecione a série alvo (ou "Todos os Anos" se for material geral).',
+        'Selecione o Vestibular alvo ("ENEM" ou "UECE") e a disciplina vinculada.',
+        'Faça o upload do PDF. A IA fará o processamento e a extração do texto em segundo plano.'
+      ],
+      tips: 'Suba os materiais estruturais logo no início dos testes para que a IA processe e divida os capítulos adequadamente.',
+      icon: (
+        <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z" />
+        </svg>
+      )
+    },
+    {
+      step: '02',
+      badge: 'PASSO 2',
+      title: 'Curadoria de Flashcards e Resumos',
+      color: 'hsl(145, 63%, 20%)',
+      bgColor: 'hsl(145, 65%, 95%)',
+      textClass: 'text-[#1B4D3E] dark:text-[#86EFAC]',
+      bgClass: 'bg-[#E8F5E9] dark:bg-[#1B4D3E]/30',
+      borderClass: 'border-[#1B4D3E]/20 dark:border-[#86EFAC]/30',
+      description: 'Após extrair as páginas, a IA sugere automaticamente resumos conceituais e perguntas/respostas para o Anki da Alice. Você faz a curadoria final.',
+      details: [
+        'Acesse a tela de "Curadoria" (exclusiva do seu perfil).',
+        'Analise os flashcards gerados dinamicamente para cada página.',
+        'Edite perguntas ou respostas livremente para refinar o conteúdo.',
+        'Aprove o material. Apenas cards aprovados entrarão na rotina de revisões da estudante.'
+      ],
+      tips: 'Sua curadoria evita alucinações de IA e garante que sua filha estude apenas informações 100% corretas e alinhadas ao edital.',
+      icon: (
+        <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.745 3.745 0 011.043 3.296A3.75 3.75 0 0121 12z" />
+        </svg>
+      )
+    },
+    {
+      step: '03',
+      badge: 'PASSO 3',
+      title: 'Iniciar o Ciclo de Estudos',
+      color: 'hsl(28, 70%, 25%)',
+      bgColor: 'hsl(28, 70%, 95%)',
+      textClass: 'text-[#A0522D] dark:text-[#FDBA74]',
+      bgClass: 'bg-[#FFF3E0] dark:bg-[#A0522D]/30',
+      borderClass: 'border-[#A0522D]/20 dark:border-[#FDBA74]/30',
+      description: 'Com a biblioteca alimentada, o terceiro passo é iniciar oficialmente o ciclo de estudos da Alice, configurando as metas.',
+      details: [
+        'Acesse a tela "Responsável".',
+        'No painel direito "Controle do Ciclo", clique no botão "Iniciar Ciclo de Estudos".',
+        'O sistema estruturará automaticamente um cronograma de 28 blocos focado fortemente em resolução de questões (mais de 50% dos blocos).',
+        'O ciclo será ativado com data inicial de hoje, liberando a tela da Alice.'
+      ],
+      tips: 'A qualquer momento nos testes, se desejar replanejar a data de início ou zerar o progresso, use o botão "Resetar Planejamento" e inicie de novo.',
+      icon: (
+        <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+        </svg>
+      )
+    },
+    {
+      step: '04',
+      badge: 'PASSO 4',
+      title: 'Acompanhar o Desempenho Qualitativo',
+      color: 'hsl(280, 50%, 25%)',
+      bgColor: 'hsl(280, 55%, 96%)',
+      textClass: 'text-[#5E3A8C] dark:text-[#D8B4FE]',
+      bgClass: 'bg-[#F3E5F5] dark:bg-[#5E3A8C]/30',
+      borderClass: 'border-[#5E3A8C]/20 dark:border-[#D8B4FE]/30',
+      description: 'O quarto passo é acompanhar o progresso a cada duas semanas no dashboard, respeitando a autonomia e privacidade de estudos da aluna.',
+      details: [
+        'Verifique os indicadores quinzenais acumulados de sono, atividades e cumprimento de blocos.',
+        'Analise os relatórios do Caderno de Erros para entender as fraquezas cognitivas (atenção vs conteúdo).',
+        'Utilize o formulário de Revisão Trimestral para registrar os acordos pedagógicos e conversas de alinhamento.'
+      ],
+      tips: 'Dar autonomia para a aluna gerenciar seu dia a dia e focar em revisões quinzenais conjuntas reduz o estresse e gera melhores resultados a longo prazo.',
+      icon: (
+        <svg className="w-12 h-12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v5.25c0 .621-.504 1.125-1.125 1.125h-2.25A1.125 1.125 0 013 18.375v-5.25zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125v-9.75zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v14.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+        </svg>
+      )
+    }
+  ];
+
+  const handleTabChange = (tab: 'estudante' | 'responsavel') => {
+    setActiveTab(tab);
+    setCurrentSlide(0);
+  };
+
+  const currentSlides = activeTab === 'estudante' ? slidesEstudante : slidesResponsavel;
+
   const nextSlide = () => {
-    if (currentSlide < slides.length - 1) {
+    if (currentSlide < currentSlides.length - 1) {
       setCurrentSlide(currentSlide + 1);
     }
   };
@@ -170,16 +272,42 @@ export default function ComoUsarPage() {
     }
   };
 
-  const slide = slides[currentSlide];
+  const slide = currentSlides[currentSlide];
 
   return (
     <div className="w-full max-w-6xl mx-auto px-4 py-8 pb-24 font-['Poppins'] text-[#1B2A33] dark:text-gray-100">
       {/* Header */}
-      <header className="border-b dark:border-gray-800 pb-6 mb-8 text-center md:text-left">
-        <h1 className="text-3xl font-bold font-['Lora'] text-[#0E3D4D] dark:text-[#E2E8F0]">Como Usar o Sistema</h1>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Guia de bordo passo a passo para extrair a máxima performance da sua rotina de estudos.
-        </p>
+      <header className="border-b dark:border-gray-800 pb-6 mb-8 text-center md:text-left flex flex-col md:flex-row justify-between items-center gap-4">
+        <div>
+          <h1 className="text-3xl font-bold font-['Lora'] text-[#0E3D4D] dark:text-[#E2E8F0]">Como Usar o Sistema</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Guia de bordo passo a passo para extrair a máxima performance da rotina de estudos.
+          </p>
+        </div>
+
+        {/* Tab Selection */}
+        <div className="flex bg-[#EAE3D5]/40 dark:bg-gray-800/40 p-1 rounded-2xl border border-[#D5CBB8]/30 dark:border-gray-700/30">
+          <button
+            onClick={() => handleTabChange('estudante')}
+            className={`py-2 px-4 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'estudante'
+                ? 'bg-[#0E3D4D] text-white shadow-sm'
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+            }`}
+          >
+            Guia da Aluna (Alice)
+          </button>
+          <button
+            onClick={() => handleTabChange('responsavel')}
+            className={`py-2 px-4 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'responsavel'
+                ? 'bg-[#0E3D4D] text-white shadow-sm'
+                : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+            }`}
+          >
+            Guia do Responsável (Bruno)
+          </button>
+        </div>
       </header>
 
       {/* Interactive Carousel */}
@@ -200,7 +328,9 @@ export default function ComoUsarPage() {
             >
               {slide.badge}
             </span>
-            <span className="text-xs font-bold text-gray-400 dark:text-gray-500">Etapa {slide.step} de 06</span>
+            <span className="text-xs font-bold text-gray-400 dark:text-gray-500">
+              Etapa {slide.step} de {currentSlides.length.toString().padStart(2, '0')}
+            </span>
           </div>
 
           <div className="flex flex-col md:flex-row gap-6 items-start">
@@ -255,7 +385,7 @@ export default function ComoUsarPage() {
               Anterior
             </button>
 
-            {currentSlide < slides.length - 1 ? (
+            {currentSlide < currentSlides.length - 1 ? (
               <button
                 onClick={nextSlide}
                 className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-[#0E3D4D] dark:bg-[#17607A] hover:bg-[#17607A] dark:hover:bg-[#0E3D4D] transition-all shadow-md shadow-[#0E3D4D]/15 active:scale-95 cursor-pointer"
@@ -264,10 +394,10 @@ export default function ComoUsarPage() {
               </button>
             ) : (
               <Link
-                href="/"
+                href={activeTab === 'estudante' ? '/' : '/responsavel'}
                 className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-all shadow-md shadow-emerald-600/15 active:scale-95 text-center"
               >
-                Começar a Estudar!
+                {activeTab === 'estudante' ? 'Começar a Estudar!' : 'Ir para o Painel!'}
               </Link>
             )}
           </div>
@@ -276,7 +406,7 @@ export default function ComoUsarPage() {
 
       {/* Progress Dots */}
       <div className="flex justify-center gap-2 mt-6">
-        {slides.map((_, index) => (
+        {currentSlides.map((_, index) => (
           <button
             key={index}
             onClick={() => setCurrentSlide(index)}
