@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { obterCicloAtivo, iniciarCicloEstudos, resetarPlanejamento } from './ciclo';
 import { iniciarSessao, atualizarSessao, concluirSessao } from './sessao';
+import { and, eq } from 'drizzle-orm';
+import { ciclos } from '../../db/schema';
 
 vi.mock('../../lib/authorization', () => ({
   requireAuthenticatedProfile: vi.fn().mockResolvedValue({
@@ -24,30 +26,64 @@ vi.mock('../../lib/authorization', () => ({
     email: null,
     papel: 'estudante',
   }),
+  requireStudentScope: vi.fn().mockResolvedValue({
+    id: 'perfil-1',
+    nome: 'Estudante Teste',
+    email: null,
+    papel: 'estudante',
+  }),
   assertOwnership: vi.fn(),
 }));
 
 // Estado global de mocks de consulta
 let selectCallsCount = 0;
-let selectMockedOutputs: any[] = [];
+let selectMockedOutputs: unknown[][] = [];
 
 let insertCallsCount = 0;
-let insertMockedOutputs: any[] = [];
+let insertMockedOutputs: unknown[][] = [];
 
 let updateCallsCount = 0;
-let updateMockedOutputs: any[] = [];
+let updateMockedOutputs: unknown[][] = [];
+let insertedValues: unknown[] = [];
+let whereValues: unknown[] = [];
+
+type MockResolver = (value: unknown[]) => unknown;
+
+interface MockQuery {
+  from: ReturnType<typeof vi.fn>;
+  where: ReturnType<typeof vi.fn>;
+  limit: ReturnType<typeof vi.fn>;
+  innerJoin: ReturnType<typeof vi.fn>;
+  orderBy: ReturnType<typeof vi.fn>;
+  values: ReturnType<typeof vi.fn>;
+  onConflictDoUpdate: ReturnType<typeof vi.fn>;
+  returning: ReturnType<typeof vi.fn>;
+  set: ReturnType<typeof vi.fn>;
+  then: (resolve: MockResolver) => Promise<unknown>;
+}
+
+interface MockDb {
+  select: () => MockQuery;
+  insert: () => MockQuery;
+  update: () => MockQuery;
+  delete: () => MockQuery;
+  transaction: (callback: (transaction: MockDb) => unknown) => Promise<unknown>;
+}
 
 // Mock da conexão com o banco de dados e do Drizzle ORM
 vi.mock('../../db', () => {
-  const mockDb: any = {
+  const mockDb: MockDb = {
     select: () => {
-      const query: any = {};
+      const query = {} as MockQuery;
       query.from = vi.fn().mockReturnValue(query);
-      query.where = vi.fn().mockReturnValue(query);
+      query.where = vi.fn((condition) => {
+        whereValues.push(condition);
+        return query;
+      });
       query.limit = vi.fn().mockReturnValue(query);
       query.innerJoin = vi.fn().mockReturnValue(query);
       query.orderBy = vi.fn().mockReturnValue(query);
-      query.then = (resolve: any) => {
+      query.then = (resolve: MockResolver) => {
         const result = selectMockedOutputs[selectCallsCount];
         selectCallsCount++;
         return Promise.resolve(result || []).then(resolve);
@@ -55,11 +91,14 @@ vi.mock('../../db', () => {
       return query;
     },
     insert: () => {
-      const query: any = {};
-      query.values = vi.fn().mockReturnValue(query);
+      const query = {} as MockQuery;
+      query.values = vi.fn((values) => {
+        insertedValues.push(values);
+        return query;
+      });
       query.onConflictDoUpdate = vi.fn().mockReturnValue(query);
       query.returning = vi.fn().mockReturnValue(query);
-      query.then = (resolve: any) => {
+      query.then = (resolve: MockResolver) => {
         const result = insertMockedOutputs[insertCallsCount];
         insertCallsCount++;
         return Promise.resolve(result || []).then(resolve);
@@ -67,11 +106,11 @@ vi.mock('../../db', () => {
       return query;
     },
     update: () => {
-      const query: any = {};
+      const query = {} as MockQuery;
       query.set = vi.fn().mockReturnValue(query);
       query.where = vi.fn().mockReturnValue(query);
       query.returning = vi.fn().mockReturnValue(query);
-      query.then = (resolve: any) => {
+      query.then = (resolve: MockResolver) => {
         const result = updateMockedOutputs[updateCallsCount];
         updateCallsCount++;
         return Promise.resolve(result || []).then(resolve);
@@ -79,14 +118,14 @@ vi.mock('../../db', () => {
       return query;
     },
     delete: () => {
-      const query: any = {};
+      const query = {} as MockQuery;
       query.where = vi.fn().mockReturnValue(query);
-      query.then = (resolve: any) => {
+      query.then = (resolve: MockResolver) => {
         return Promise.resolve([]).then(resolve);
       };
       return query;
     },
-    transaction: async (callback: any) => {
+    transaction: async (callback: (transaction: MockDb) => unknown) => {
       return await callback(mockDb);
     }
   };
@@ -101,6 +140,8 @@ describe('Server Actions - Fase 1', () => {
     insertMockedOutputs = [];
     updateCallsCount = 0;
     updateMockedOutputs = [];
+    insertedValues = [];
+    whereValues = [];
   });
 
   describe('obterCicloAtivo()', () => {
@@ -114,6 +155,10 @@ describe('Server Actions - Fase 1', () => {
       expect(resultado?.ciclo.nome).toContain('Ciclo Padrão');
       expect(resultado?.blocos.length).toBeGreaterThan(0);
       expect(selectCallsCount).toBe(1);
+      expect(whereValues[0]).toEqual(and(
+        eq(ciclos.ativo, true),
+        eq(ciclos.estudantePerfilId, 'perfil-1')
+      ));
     });
 
     it('deve retornar o ciclo ativo, blocos ordenados e proxima_ordem', async () => {
@@ -182,6 +227,9 @@ describe('Server Actions - Fase 1', () => {
       expect(res.cicloId).toBe('novo-ciclo-2027');
       expect(insertCallsCount).toBe(30); // 1 para ciclo, 28 para blocos, 1 para cicloEstado
       expect(selectCallsCount).toBe(1); // 1 para disciplinas
+      expect(insertedValues[0]).toEqual(expect.objectContaining({
+        estudantePerfilId: 'perfil-1'
+      }));
     });
   });
 

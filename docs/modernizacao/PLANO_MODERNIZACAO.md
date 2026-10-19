@@ -4,7 +4,7 @@
 
 **Princípio:** menor alteração segura possível; sem refatoração ampla sem necessidade
 
-**Estado:** F1.02 concluída em 19/10/2026; demais tarefas aguardam autorização
+**Estado:** F1.02, F1.03 e F1.05 concluídas; F1.03-M reprovou a proposta monolítica; F1.03-R foi aprovada com ressalvas; F1.05 foi **APROVADA** em 19/10/2026, sem acesso ou alteração de produção
 
 ## 1. Estratégia geral
 
@@ -23,9 +23,13 @@ Regras para todas as tarefas:
 
 ```text
 F1.02 Autorização imediata
-   ├── F1.03 Identidade e ownership
-   ├── F1.04 RLS e views
-   └── F1.05 Isolamento do backup/restore
+   └── F1.03 Identidade e ownership
+          ├── F1.03-M Validação isolada (reprovou proposta monolítica)
+          └── F1.03-R Expansão compatível + contração separada
+                    ↓
+                 F1.05 Isolamento do backup/restore
+                    ↓
+                 F1.04 RLS e views
           ↓
 F1.06 Dependências e segredos
           ↓
@@ -67,7 +71,7 @@ F1.15 Testes de segurança/E2E e operação
 
 ### F1.03 — Identidade canônica e ownership
 
-**Status:** parcialmente antecipada pela F1.02; saneamento histórico e decisões de schema permanecem pendentes.
+**Status:** análise e preparação concluídas em 19/10/2026; migration não executada e integração PostgreSQL pendente.
 
 - **Objetivo:** eliminar UUIDs hardcoded e a confusão entre `authUserId` e `perfis.id`.
 - **Arquivos potencialmente afetados:** auth route, `src/db/schema.ts` apenas se necessário, actions de sessão/check-in/redação/simulado/FSRS/dashboard/responsável/curadoria/acervo e componentes que enviam `perfilId`.
@@ -77,6 +81,35 @@ F1.15 Testes de segurança/E2E e operação
 - **Testes necessários:** integração com dois perfis reais; FK; usuário não lê/altera registro alheio; ausência de UUID fixo no runtime.
 - **Critérios de aceite:** inserts usam `perfis.id` existente; nenhum módulo de runtime contém IDs de perfil fixos; queries sensíveis têm filtro de ownership.
 - **Reversão:** feature flag temporária somente em ambiente de teste e rollback do commit; não restaurar IDs hardcoded em produção.
+- **Resultado da análise:** `perfis.id` confirmado como identidade canônica; `authUserId` removido do contexto autorizado e mantido intacto no schema; 31 tabelas inventariadas; ciclos, repertórios e revisões trimestrais identificados sem ownership; proposta 1:1 responsável–estudante e auditoria SQL read-only preparadas fora do journal Drizzle.
+- **Migration proposta:** relação `responsavel_estudante`, ownership aditivo, quatro FKs ausentes e constraints compostas prioritárias, sempre condicionados a preflight sem ambiguidades.
+- **Validação obtida:** 77/77 testes unitários, TypeScript, build, lint dos arquivos alterados e `git diff --check` aprovados.
+- **Validação pendente:** auditoria histórica e migration não foram executadas; não existe banco PostgreSQL descartável dedicado e atestado. Não considerar a proposta pronta para produção.
+
+### F1.03-M — Validação isolada da migration
+
+**Status:** concluída em 19/10/2026; proposta classificada como **REPROVADA** e não autorizada para qualquer ambiente persistente.
+
+- **Ambiente:** PostgreSQL 18.4 real em cluster efêmero exclusivo, conectado somente por `127.0.0.1`, com banco, usuário, porta e diretório próprios; nenhum `.env`, `DATABASE_URL`, Supabase ou banco preexistente foi usado.
+- **Limitação de fidelidade:** a migration histórica `0000` falhou como esperado porque o runtime local não contém `pgvector`. Os ensaios restantes usaram uma cópia temporária da estrutura em que apenas `CREATE EXTENSION vector` foi removido e `vector(1536)` foi substituído por `text`; essa adaptação não valida o pgvector.
+- **Resultado técnico:** o SQL original da proposta concluiu no PostgreSQL real sobre a estrutura adaptada, preservou IDs e contagens, criou o vínculo 1:1, realizou os backfills e validou as FKs.
+- **Bloqueio:** a contração `NOT NULL` quebra as escritas atuais de ciclos, repertórios, revisões trimestrais e o restore legado. O rollback operacional descrito também não é compatível com a aplicação anterior.
+- **Lacunas:** `id = auth_user_id`, owner com papel incompatível e inversão dos papéis no vínculo continuam aceitos; schema Drizzle, actions e backup não representam a proposta.
+- **Rollback físico:** executado no cluster descartável, preservando IDs e contagens; a reconstrução subsequente funcionou. Isso não equivale a rollback operacional ou restauração de backup.
+- **Próximo gate obrigatório:** criar uma F1.03-R pequena, dividindo a evolução em expansão nullable, aplicação compatível e contração posterior. Repetir a F1.03-M com PostgreSQL+pgvector e `pg_dump`/`pg_restore` antes da F1.04.
+
+### F1.03-R — Correção da migration e compatibilidade do aplicativo
+
+**Status:** concluída em 19/10/2026 como **APROVADA COM RESSALVAS**; expansão preparada e versionada, contração fora do fluxo automático e nenhuma migration aplicada em produção.
+
+- **Solução:** a antiga proposta monolítica foi substituída operacionalmente por `0003_f1_03_r_expansao.sql`, com owners nullable, preflight antes da DDL, vínculo 1:1, backfill determinístico e FKs validadas. A contração permanece em `docs/modernizacao/propostas/`, sem entrada no journal.
+- **Compatibilidade:** inserts equivalentes à aplicação anterior e inserts da aplicação atualizada funcionaram durante a expansão. Ciclos, repertórios e revisões trimestrais passaram a gravar `perfis.id`; consultas e mutações relevantes usam o vínculo autenticado.
+- **Validação PostgreSQL:** PGlite/PostgreSQL 18.6 em memória, pgvector 0.8.7 real, cadeia histórica e expansionista via migrador Drizzle, fixtures artificiais, backfill repetido, cenários negativos, rollback físico e dump/restore lógico aprovados. Nenhuma conexão, variável ou dado externo foi utilizado.
+- **Validação da aplicação:** TypeScript, 104/104 testes unitários, build, lint dirigido de todos os TS/TSX alterados, `drizzle-kit check` e `git diff --check` aprovados.
+- **Rollback operacional:** viável enquanto apenas a expansão nullable estiver aplicada. Depois da futura contração, a versão mínima compatível passa a ser F1.03-R; para voltar ao aplicativo anterior é obrigatório desfazer primeiro a contração.
+- **Ressalvas P0/P1:** o restore JSON interativo continua destrutivo, exporta a linha inteira de `perfis` e não equivale a recuperação operacional; deve ser isolado na F1.05. FKs não garantem sozinhas que o papel do perfil permaneça semanticamente compatível após a migration; preflight e guards server-side fornecem a contenção atual.
+- **Contração:** somente após aplicação compatível implantada, backfill/auditoria sem pendências, backup nativo restaurado, integração no PostgreSQL-alvo, rollback ensaiado e aprovação específica. Não executar automaticamente.
+- **Próximo gate:** F1.05 antes da contração e antes de iniciar F1.04.
 
 ### F1.04 — RLS e views agregadas versionadas
 
@@ -91,14 +124,22 @@ F1.15 Testes de segurança/E2E e operação
 
 ### F1.05 — Isolamento imediato do backup/restore
 
+**Status:** concluída em 19/10/2026 como **APROVADA**; restore interativo bloqueado na interface e no servidor, exportação administrativa protegida e nenhuma restauração executada.
+
 - **Objetivo:** impedir exfiltração, elevação e destruição por chamadas normais da aplicação.
 - **Arquivos potencialmente afetados:** `src/app/actions/backup.ts`, `src/components/ResponsavelPage.tsx`, guards/auditoria.
 - **Dependências:** F1.02; F1.03 para identidade.
 - **Riscos:** indisponibilizar temporariamente restore pela UI; manter falso senso de segurança se apenas esconder o botão.
-- **Estratégia:** desabilitar restore interativo até redesenho; exigir responsável + reautenticação; remover `passwordHash` do export; validar versão/tamanho antes de qualquer mutação; audit log.
-- **Testes necessários:** anônimo/estudante negados; export não contém hashes; JSON inválido não inicia transação; restore exige modo operacional.
+- **Estratégia:** desabilitar integralmente o restore interativo até redesenho operacional; exigir responsável na exportação/validação; remover dados de autenticação do export; validar versão, estrutura e limites exclusivamente em memória. Reautenticação, modo operacional e trilha de auditoria pertencem ao futuro fluxo de recuperação e não reabrem o restore comum.
+- **Testes necessários:** anônimo/estudante negados; export não contém hashes ou segredos; JSON inválido não inicia escrita; chamada direta ao restore permanece bloqueada.
 - **Critérios de aceite:** nenhuma rota/action normal apaga base; dados de autenticação não saem no arquivo; tentativa inválida é side-effect free.
 - **Reversão:** reativar somente versão anterior em ambiente isolado; nunca reexpor restore inseguro em produção.
+- **Resultado:** o corpo destrutivo foi removido da Server Action histórica, que agora exige responsável e sempre retorna negação antes de interpretar o arquivo ou iniciar qualquer escrita. A UI não importa nem chama restore e não oferece seletor de arquivo.
+- **Exportação segura:** 32 coleções usam projeções positivas explícitas; `passwordHash`, `authUserId`, e-mail, tokens, cookies, credenciais e segredos não fazem parte das seleções. O arquivo se declara exportação administrativa, sem objetos binários do Storage e não restaurável automaticamente.
+- **Manifesto e integridade:** formato 1 com aplicação, timestamp, tipo, coleções, contagens, flags de segurança e SHA-256 sobre a serialização canônica de `dados`. O hash detecta alteração, mas não é assinatura nem prova de autenticidade.
+- **Validação:** rotina pura em memória com contrato fechado de campos/tipos/nullability, UUIDs, enums, datas, coleções e contagens; limites de 10 MiB, 100.000 registros, profundidade 20, 500.000 nós e 100 erros.
+- **Validação obtida:** 16 arquivos e 114/114 testes aprovados; TypeScript, build, lint dos seis arquivos TypeScript/TSX da F1.05 e `git diff --check` aprovados.
+- **Riscos residuais:** a exportação contém dados pessoais e pedagógicos em claro, não inclui objetos do Storage e não permite recuperação integral. Backup nativo PostgreSQL, Storage, criptografia, retenção e restore temporário permanecem na F1.14.
 
 ### F1.06 — Atualização de dependências críticas e separação de segredos
 
@@ -239,8 +280,10 @@ O sistema só deve receber dados reais quando todos os itens abaixo estiverem co
 
 ## 6. Próxima tarefa
 
-**Recomendação: F1.03 — Consolidação da identidade canônica e do ownership.**
+**Próxima autorização recomendada: F1.04 — RLS e views agregadas versionadas.**
 
-Escopo inicial recomendado: auditar dados históricos somente em cópia isolada; decidir a relação responsável–estudante e o ownership das tabelas globais; preparar migration e rollback sem aplicação em produção; adicionar integração com dois perfis em banco descartável.
+Escopo: tornar a separação entre estudante e responsável verificável no banco, inventariar políticas externas de forma autorizada, versionar RLS e views agregadas e validar a matriz de acesso em PostgreSQL descartável antes de qualquer alteração fora do ensaio.
+
+A expansão F1.03-R continua dependendo de auditoria autorizada e aprovação própria. A contração permanece bloqueada até aplicação compatível implantada, backfill limpo, backup nativo restaurado e nova autorização. A F1.14 continua responsável pela recuperação completa PostgreSQL + Storage; a exportação F1.05 não substitui esse gate.
 
 Não iniciar automaticamente. Aguardar aprovação explícita.

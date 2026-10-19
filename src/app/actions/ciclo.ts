@@ -2,9 +2,13 @@
 
 import { db } from '../../db';
 import { ciclos, cicloBlocos, cicloEstado, disciplinas, topicos } from '../../db/schema';
-import { eq, asc } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { MOCK_CICLO_ATIVO, MOCK_BLOCOS, MOCK_TOPICOS } from '../../lib/mocks';
-import { requireAuthenticatedProfile, requireRole } from '../../lib/authorization';
+import {
+  requireAuthenticatedProfile,
+  requireManagedStudentProfile,
+  requireStudentScope
+} from '../../lib/authorization';
 
 export interface CicloAtivoData {
   ciclo: typeof ciclos.$inferSelect;
@@ -15,20 +19,23 @@ export interface CicloAtivoData {
 }
 
 export async function obterCicloAtivo(): Promise<CicloAtivoData | null> {
-  await requireAuthenticatedProfile();
+  const estudante = await requireStudentScope();
 
   try {
     // 1. Busca o ciclo ativo
     const [cicloAtivo] = await db
       .select()
       .from(ciclos)
-      .where(eq(ciclos.ativo, true))
+      .where(and(
+        eq(ciclos.ativo, true),
+        eq(ciclos.estudantePerfilId, estudante.id)
+      ))
       .limit(1);
 
     if (!cicloAtivo) {
       // Se estiver vazio no banco mas a conexão funcionar
       return {
-        ciclo: MOCK_CICLO_ATIVO,
+        ciclo: { ...MOCK_CICLO_ATIVO, estudantePerfilId: estudante.id },
         blocos: MOCK_BLOCOS,
         proximaOrdem: 1
       };
@@ -65,11 +72,11 @@ export async function obterCicloAtivo(): Promise<CicloAtivoData | null> {
       blocos,
       proximaOrdem,
     };
-  } catch (error) {
+  } catch {
     console.warn('Banco offline ou indisponível. Usando mock data para ciclo.');
     // Retorna o ciclo mockado padrão (resiliência frontend)
     return {
-      ciclo: MOCK_CICLO_ATIVO,
+      ciclo: { ...MOCK_CICLO_ATIVO, estudantePerfilId: estudante.id },
       blocos: MOCK_BLOCOS,
       proximaOrdem: 1,
     };
@@ -88,20 +95,21 @@ export async function obterTopicosPorDisciplina(disciplinaId: string) {
     
     if (list.length > 0) return list;
     return MOCK_TOPICOS[disciplinaId] || [];
-  } catch (error) {
+  } catch {
     return MOCK_TOPICOS[disciplinaId] || [];
   }
 }
 
 export async function iniciarCicloEstudos(): Promise<{ sucesso: boolean; mensagem: string; cicloId?: string }> {
-  await requireRole('responsavel');
+  const estudante = await requireManagedStudentProfile();
 
   try {
     return await db.transaction(async (tx) => {
       // 1. Set all existing cycles to active=false
       await tx
         .update(ciclos)
-        .set({ ativo: false });
+        .set({ ativo: false })
+        .where(eq(ciclos.estudantePerfilId, estudante.id));
 
       // 2. Create a new active cycle
       const [novoCiclo] = await tx
@@ -110,6 +118,7 @@ export async function iniciarCicloEstudos(): Promise<{ sucesso: boolean; mensage
           nome: 'Ciclo Principal - 2027',
           anoLetivo: 2027,
           ativo: true,
+          estudantePerfilId: estudante.id,
           blocosPrevistosSemana: 28,
           criadoEm: new Date(),
         })
@@ -210,17 +219,27 @@ export async function iniciarCicloEstudos(): Promise<{ sucesso: boolean; mensage
 }
 
 export async function resetarPlanejamento(): Promise<{ sucesso: boolean; mensagem: string }> {
-  await requireRole('responsavel');
+  const estudante = await requireManagedStudentProfile();
 
   try {
     return await db.transaction(async (tx) => {
-      // 1. Set all cycles to active=false
+      const ciclosDaEstudante = await tx
+        .select({ id: ciclos.id })
+        .from(ciclos)
+        .where(eq(ciclos.estudantePerfilId, estudante.id));
+
+      // 1. Set all student cycles to active=false
       await tx
         .update(ciclos)
-        .set({ ativo: false });
+        .set({ ativo: false })
+        .where(eq(ciclos.estudantePerfilId, estudante.id));
 
-      // 2. Delete/clear all cicloEstado entries so that there is no active cycle state
-      await tx.delete(cicloEstado);
+      // 2. Delete/clear only state entries inherited from this student's cycles
+      if (ciclosDaEstudante.length > 0) {
+        await tx
+          .delete(cicloEstado)
+          .where(inArray(cicloEstado.cicloId, ciclosDaEstudante.map((ciclo) => ciclo.id)));
+      }
 
       return {
         sucesso: true,

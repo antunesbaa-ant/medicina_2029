@@ -1,4 +1,20 @@
-import { pgTable, uuid, varchar, text, integer, timestamp, boolean, jsonb, pgEnum, customType, doublePrecision } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import {
+  type AnyPgColumn,
+  boolean,
+  check,
+  customType,
+  doublePrecision,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  smallint,
+  text,
+  timestamp,
+  uuid,
+  varchar
+} from 'drizzle-orm/pg-core';
 
 // Custom type for pgvector
 const vector = customType<{ data: number[] }>({
@@ -81,6 +97,25 @@ export const perfis = pgTable('perfis', {
   criadoEm: timestamp('criado_em').defaultNow().notNull()
 });
 
+export const responsavelEstudante = pgTable('responsavel_estudante', {
+  vinculoId: smallint('vinculo_id').primaryKey().default(1),
+  responsavelPerfilId: uuid('responsavel_perfil_id')
+    .references(() => perfis.id, { onDelete: 'restrict' })
+    .notNull()
+    .unique(),
+  estudantePerfilId: uuid('estudante_perfil_id')
+    .references(() => perfis.id, { onDelete: 'restrict' })
+    .notNull()
+    .unique(),
+  criadoEm: timestamp('criado_em').defaultNow().notNull()
+}, (table) => [
+  check('responsavel_estudante_singleton_check', sql`${table.vinculoId} = 1`),
+  check(
+    'responsavel_estudante_ids_distintos_check',
+    sql`${table.responsavelPerfilId} <> ${table.estudantePerfilId}`
+  )
+]);
+
 export const disciplinas = pgTable('disciplinas', {
   id: uuid('id').primaryKey().defaultRandom(),
   nome: varchar('nome', { length: 255 }).notNull(),
@@ -96,7 +131,8 @@ export const topicos = pgTable('topicos', {
   seriePrevista: integer('serie_prevista').notNull(), // 1, 2, 3
   incidenciaEnem: integer('incidencia_enem').notNull(), // 1..5
   incidenciaUece: integer('incidencia_uece').notNull(), // 1..5
-  preRequisitoTopicoId: uuid('pre_requisito_topico_id'),
+  preRequisitoTopicoId: uuid('pre_requisito_topico_id')
+    .references((): AnyPgColumn => topicos.id, { onDelete: 'set null' }),
   ordem: integer('ordem').notNull(),
   coberturaMaterial: coberturaMaterialEnum('cobertura_material').default('sem_fonte').notNull()
 });
@@ -104,6 +140,8 @@ export const topicos = pgTable('topicos', {
 // 4.2 Ciclo de estudos — modelar como FILA, não como calendário
 export const ciclos = pgTable('ciclos', {
   id: uuid('id').primaryKey().defaultRandom(),
+  estudantePerfilId: uuid('estudante_perfil_id')
+    .references(() => perfis.id, { onDelete: 'restrict' }),
   nome: varchar('nome', { length: 255 }).notNull(),
   anoLetivo: integer('ano_letivo').notNull(),
   ativo: boolean('ativo').default(false).notNull(),
@@ -217,7 +255,8 @@ export const questoes = pgTable('questoes', {
   resolucao: text('resolucao'),
   imagemUrl: varchar('imagem_url', { length: 1000 }),
   status: statusQuestaoEnum('status').default('rascunho').notNull(),
-  arquivoOrigemId: uuid('arquivo_origem_id'),
+  arquivoOrigemId: uuid('arquivo_origem_id')
+    .references((): AnyPgColumn => acervoArquivos.id, { onDelete: 'set null' }),
   fonteChunkIds: jsonb('fonte_chunk_ids'), // uuid[]
   confiancaGeracao: doublePrecision('confianca_geracao'),
   ativa: boolean('ativa').default(true).notNull()
@@ -233,7 +272,8 @@ export const tentativas = pgTable('tentativas', {
   perfilId: uuid('perfil_id').references(() => perfis.id).notNull(),
   questaoId: uuid('questao_id').references(() => questoes.id).notNull(),
   sessaoId: uuid('sessao_id').references(() => sessoes.id),
-  simuladoId: uuid('simulado_id'),
+  simuladoId: uuid('simulado_id')
+    .references((): AnyPgColumn => simulados.id, { onDelete: 'restrict' }),
   alternativaMarcada: varchar('alternativa_marcada', { length: 10 }).notNull(),
   correta: boolean('correta').notNull(),
   segundos: integer('segundos').notNull(),
@@ -283,12 +323,14 @@ export const redacoes = pgTable('redacoes', {
   notaTotal: integer('nota_total'),
   competencias: jsonb('competencias'),
   corrigidaPor: varchar('corrigida_por', { length: 255 }),
-  reescritadeId: uuid('reescrita_de_id'),
+  reescritadeId: uuid('reescrita_de_id')
+    .references((): AnyPgColumn => redacoes.id, { onDelete: 'set null' }),
   observacoes: text('observacoes')
 });
 
 export const repertorios = pgTable('repertorios', {
   id: uuid('id').primaryKey().defaultRandom(),
+  perfilId: uuid('perfil_id').references(() => perfis.id, { onDelete: 'restrict' }),
   referencia: text('referencia').notNull(),
   resumo2Linhas: text('resumo_2_linhas').notNull(),
   temasAplicaveis: jsonb('temas_aplicaveis').notNull(),
@@ -348,6 +390,10 @@ export const checkins = pgTable('checkins', {
 
 export const revisoesTrimestrais = pgTable('revisoes_trimestrais', {
   id: uuid('id').primaryKey().defaultRandom(),
+  estudantePerfilId: uuid('estudante_perfil_id')
+    .references(() => perfis.id, { onDelete: 'restrict' }),
+  registradaPorPerfilId: uuid('registrada_por_perfil_id')
+    .references(() => perfis.id, { onDelete: 'restrict' }),
   trimestre: integer('trimestre').notNull(),
   ano: integer('ano').notNull(),
   aderenciaPct: doublePrecision('aderencia_pct').notNull(),

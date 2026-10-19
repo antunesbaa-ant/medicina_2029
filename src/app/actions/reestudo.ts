@@ -10,68 +10,85 @@ export async function injetarTopicoNoCiclo(
   topicoId: string,
   duracaoMin: number = 50
 ): Promise<{ sucesso: boolean; mensagem: string }> {
-  await requireRole('estudante');
+  const estudante = await requireRole('estudante');
 
   try {
-    // A. Busca o tópico para descobrir a disciplinaId
-    const [topico] = await db
-      .select({
-        disciplinaId: topicos.disciplinaId,
-        nome: topicos.nome
-      })
-      .from(topicos)
-      .where(eq(topicos.id, topicoId))
-      .limit(1);
+    return await db.transaction(async (tx) => {
+      // A. Busca o tópico para descobrir a disciplinaId
+      const [topico] = await tx
+        .select({
+          disciplinaId: topicos.disciplinaId,
+          nome: topicos.nome
+        })
+        .from(topicos)
+        .where(eq(topicos.id, topicoId))
+        .limit(1);
 
-    if (!topico) {
-      return { sucesso: false, mensagem: 'Tópico não encontrado.' };
-    }
+      if (!topico) {
+        return { sucesso: false, mensagem: 'Tópico não encontrado.' };
+      }
 
-    // B. Busca o ciclo ativo
-    const [cicloAtivo] = await db
-      .select({ id: ciclos.id })
-      .from(ciclos)
-      .where(eq(ciclos.ativo, true))
-      .limit(1);
+      // B. Busca o ciclo ativo pertencente à estudante autenticada
+      const [cicloAtivo] = await tx
+        .select({ id: ciclos.id })
+        .from(ciclos)
+        .where(and(
+          eq(ciclos.ativo, true),
+          eq(ciclos.estudantePerfilId, estudante.id)
+        ))
+        .limit(1);
 
-    if (!cicloAtivo) {
-      return { sucesso: false, mensagem: 'Não há nenhum ciclo ativo para injetar o re-estudo.' };
-    }
+      if (!cicloAtivo) {
+        return { sucesso: false, mensagem: 'Não há nenhum ciclo ativo para injetar o re-estudo.' };
+      }
 
-    // C. Busca a próxima ordem (ponteiro atual)
-    const [estado] = await db
-      .select({ proximaOrdem: cicloEstado.proximaOrdem })
-      .from(cicloEstado)
-      .where(eq(cicloEstado.cicloId, cicloAtivo.id))
-      .limit(1);
+      // C. Busca a próxima ordem e o limite atual da fila
+      const [estado] = await tx
+        .select({ proximaOrdem: cicloEstado.proximaOrdem })
+        .from(cicloEstado)
+        .where(eq(cicloEstado.cicloId, cicloAtivo.id))
+        .limit(1);
+      const [limiteFila] = await tx
+        .select({ maiorOrdem: sql<number>`coalesce(max(${cicloBlocos.ordem}), 0)::int` })
+        .from(cicloBlocos)
+        .where(eq(cicloBlocos.cicloId, cicloAtivo.id))
+        .limit(1);
 
-    const proximaOrdem = estado ? estado.proximaOrdem : 1;
+      const proximaOrdem = estado ? estado.proximaOrdem : 1;
+      const deslocamentoSeguro = Math.max((limiteFila?.maiorOrdem ?? 0) + 1, 1);
 
-    // D. Abre espaço na fila: incrementa ordem de todos os blocos >= proximaOrdem
-    await db
-      .update(cicloBlocos)
-      .set({ ordem: sql`ordem + 1` })
-      .where(
-        and(
+      // D. Move primeiro para uma faixa livre e depois para a posição final.
+      // Isso permanece compatível com a unique (ciclo_id, ordem) da contração.
+      await tx
+        .update(cicloBlocos)
+        .set({ ordem: sql`${cicloBlocos.ordem} + ${deslocamentoSeguro}` })
+        .where(and(
           eq(cicloBlocos.cicloId, cicloAtivo.id),
           gte(cicloBlocos.ordem, proximaOrdem)
-        )
-      );
+        ));
+      await tx
+        .update(cicloBlocos)
+        .set({ ordem: sql`${cicloBlocos.ordem} - ${deslocamentoSeguro - 1}` })
+        .where(and(
+          eq(cicloBlocos.cicloId, cicloAtivo.id),
+          gte(cicloBlocos.ordem, proximaOrdem + deslocamentoSeguro)
+        ));
 
-    // E. Insere o novo bloco de re-estudo (tipo 'conteudo') com ordem = proximaOrdem
-    await db.insert(cicloBlocos).values({
-      cicloId: cicloAtivo.id,
-      ordem: proximaOrdem,
-      disciplinaId: topico.disciplinaId,
-      tipo: 'conteudo',
-      estiloAlvo: 'enem',
-      duracaoMin
+      // E. Insere o novo bloco dentro da mesma transação da reordenação
+      await tx.insert(cicloBlocos).values({
+        cicloId: cicloAtivo.id,
+        ordem: proximaOrdem,
+        disciplinaId: topico.disciplinaId,
+        tipo: 'conteudo',
+        estiloAlvo: 'enem',
+        duracaoMin
+      });
+
+      return {
+        sucesso: true,
+        mensagem: `Tópico "${topico.nome}" injetado com sucesso como o próximo bloco da sua fila de estudos!`
+      };
     });
-
-    return {
-      sucesso: true,
-      mensagem: `Tópico "${topico.nome}" injetado com sucesso como o próximo bloco da sua fila de estudos!`
-    };
   } catch (error) {
     console.error('Erro ao injetar re-estudo no ciclo:', error);
     return { sucesso: false, mensagem: 'Erro ao injetar bloco.' };

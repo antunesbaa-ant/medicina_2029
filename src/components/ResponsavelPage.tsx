@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { obterAcompanhamentoQuinzenal, registrarRevisaoTrimestral, obterRevisoesTrimestrais, QuinzenaResumo } from '../app/actions/responsavel';
-import { exportarDadosCompletos, restaurarDadosCompletos } from '../app/actions/backup';
+import { exportarDadosCompletos } from '../app/actions/backup';
 import { iniciarCicloEstudos, resetarPlanejamento } from '../app/actions/ciclo';
 
 export default function ResponsavelPage() {
   const [quinzenas, setQuinzenas] = useState<QuinzenaResumo[]>([]);
-  const [trimestrais, setTrimestrais] = useState<any[]>([]);
+  const [trimestrais, setTrimestrais] = useState<Awaited<ReturnType<typeof obterRevisoesTrimestrais>>>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [processandoCiclo, setProcessandoCiclo] = useState<boolean>(false);
 
@@ -64,38 +64,17 @@ export default function ResponsavelPage() {
   const handleExportar = async () => {
     try {
       const dataStr = await exportarDadosCompletos();
-      const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-      
-      const exportFileDefaultName = `medicina_2029_backup_${new Date().toISOString().split('T')[0]}.json`;
-      
+      const exportFileDefaultName = `medicina_2029_exportacao_administrativa_${new Date().toISOString().split('T')[0]}.json`;
+      const exportUrl = URL.createObjectURL(new Blob([dataStr], { type: 'application/json' }));
       const linkElement = document.createElement('a');
-      linkElement.setAttribute('href', dataUri);
+      linkElement.setAttribute('href', exportUrl);
       linkElement.setAttribute('download', exportFileDefaultName);
       linkElement.click();
-      setStatusMsg('Backup exportado com sucesso.');
+      URL.revokeObjectURL(exportUrl);
+      setStatusMsg('Exportação administrativa gerada com sucesso.');
     } catch (err) {
       console.error(err);
-      setStatusMsg('Falha ao exportar backup.');
-    }
-  };
-
-  const handleRestaurar = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const fileReader = new FileReader();
-    if (e.target.files && e.target.files[0]) {
-      fileReader.readAsText(e.target.files[0], "UTF-8");
-      fileReader.onload = async (event) => {
-        const text = event.target?.result as string;
-        if (text) {
-          setStatusMsg('Restaurando banco...');
-          const res = await restaurarDadosCompletos(text);
-          if (res.sucesso) {
-            setStatusMsg('Base de dados restaurada com sucesso!');
-            loadData();
-          } else {
-            setStatusMsg(res.mensagem);
-          }
-        }
-      };
+      setStatusMsg('Falha ao gerar a exportação administrativa.');
     }
   };
 
@@ -230,11 +209,11 @@ export default function ResponsavelPage() {
                     <div className="text-xs space-y-2 font-['Lora']">
                       <div>
                         <strong className="text-[#0E3D4D] block uppercase font-['Poppins'] text-[9px] text-gray-400 tracking-wider">Percepções e Alinhamento</strong>
-                        <p className="text-gray-700 italic">"{t.conversa}"</p>
+                        <p className="text-gray-700 italic">&ldquo;{t.conversa}&rdquo;</p>
                       </div>
                       <div>
                         <strong className="text-[#0E3D4D] block uppercase font-['Poppins'] text-[9px] text-gray-400 tracking-wider">Decisões e Acordos</strong>
-                        <p className="text-gray-700 italic">"{t.decisoes}"</p>
+                        <p className="text-gray-700 italic">&ldquo;{t.decisoes}&rdquo;</p>
                       </div>
                     </div>
                   </div>
@@ -357,11 +336,11 @@ export default function ResponsavelPage() {
               </div>
             </section>
 
-            {/* Backup & Export Section */}
+            {/* Exportação administrativa */}
             <section className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
-              <h3 className="text-base font-bold font-['Lora'] text-[#0E3D4D] border-b pb-2">Backup do Sistema</h3>
+              <h3 className="text-base font-bold font-['Lora'] text-[#0E3D4D] border-b pb-2">Exportação de Dados</h3>
               <p className="text-xs text-gray-500 leading-relaxed font-medium">
-                Exporte todo o seu progresso, acervo e histórico de simulados em formato JSON ou restaure um backup anterior em uma base limpa.
+                Gere uma exportação administrativa em JSON. O arquivo não contém segredos nem os objetos binários do Storage e não constitui um backup completo ou restaurável.
               </p>
               
               <div className="flex flex-col gap-2">
@@ -369,23 +348,16 @@ export default function ResponsavelPage() {
                   onClick={handleExportar}
                   className="w-full py-2.5 bg-[#0E3D4D] text-white text-xs font-bold rounded-lg hover:bg-[#17607A] transition-all text-center"
                 >
-                  Exportar Backup Completo (JSON)
+                  Exportar Dados Administrativos (JSON)
                 </button>
-                
-                <div className="border-t pt-3">
-                  <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Restaurar de Backup</label>
-                  <input
-                    type="file"
-                    accept=".json"
-                    onChange={handleRestaurar}
-                    className="w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 cursor-pointer"
-                  />
-                  {statusMsg && (
-                    <p className={`text-[10px] font-bold mt-2 ${statusMsg.includes('sucesso') ? 'text-emerald-600' : 'text-amber-600'}`}>
-                      {statusMsg}
-                    </p>
-                  )}
-                </div>
+                <p className="text-[10px] font-semibold text-amber-700 leading-relaxed border-t pt-3">
+                  A restauração pela interface está temporariamente indisponível por segurança.
+                </p>
+                {statusMsg && (
+                  <p className={`text-[10px] font-bold mt-2 ${statusMsg.includes('sucesso') ? 'text-emerald-600' : 'text-amber-600'}`}>
+                    {statusMsg}
+                  </p>
+                )}
               </div>
             </section>
           </div>

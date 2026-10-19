@@ -154,7 +154,8 @@ export async function obterAcompanhamentoQuinzenal(): Promise<QuinzenaResumo[]> 
 
 // 2. Salvar Revisão Trimestral
 export async function registrarRevisaoTrimestral(dados: RevisaoTrimestralInput): Promise<{ sucesso: boolean; mensagem: string }> {
-  await requireRole('responsavel');
+  const responsavel = await requireRole('responsavel');
+  const estudante = await requireManagedStudentProfile();
 
   try {
     // Calculamos métricas médias para guardar na revisão trimestral
@@ -164,6 +165,8 @@ export async function registrarRevisaoTrimestral(dados: RevisaoTrimestralInput):
     const somaRedacoes = quinzenaInfo.reduce((acc, curr) => acc + curr.redacoesEscritas, 0);
 
     await db.insert(revisoesTrimestrais).values({
+      estudantePerfilId: estudante.id,
+      registradaPorPerfilId: responsavel.id,
       trimestre: dados.trimestre,
       ano: dados.ano,
       aderenciaPct: mediaAderencia,
@@ -185,10 +188,18 @@ export async function registrarRevisaoTrimestral(dados: RevisaoTrimestralInput):
 
 // 3. Listar Revisões Trimestrais registradas
 export async function obterRevisoesTrimestrais() {
-  await requireRole('responsavel');
+  const responsavel = await requireRole('responsavel');
+  const estudante = await requireManagedStudentProfile();
 
   try {
-    return await db.select().from(revisoesTrimestrais).orderBy(desc(revisoesTrimestrais.fechadaEm));
+    return await db
+      .select()
+      .from(revisoesTrimestrais)
+      .where(and(
+        eq(revisoesTrimestrais.estudantePerfilId, estudante.id),
+        eq(revisoesTrimestrais.registradaPorPerfilId, responsavel.id)
+      ))
+      .orderBy(desc(revisoesTrimestrais.fechadaEm));
   } catch (error) {
     console.error('Erro ao listar revisões trimestrais:', error);
     return [];

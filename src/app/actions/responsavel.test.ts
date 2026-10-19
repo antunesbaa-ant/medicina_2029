@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { obterAcompanhamentoQuinzenal, registrarRevisaoTrimestral, obterRevisoesTrimestrais } from './responsavel';
 import * as responsavelActions from './responsavel';
+import { db } from '../../db';
+import { and, eq } from 'drizzle-orm';
+import { revisoesTrimestrais } from '../../db/schema';
 
 vi.mock('../../lib/authorization', () => ({
   requireAuthenticatedProfile: vi.fn().mockResolvedValue({
@@ -29,7 +32,7 @@ vi.mock('../../lib/authorization', () => ({
 
 // Mock DB
 vi.mock('../../db', () => {
-  const queryBuilder: any = {
+  const queryBuilder: Record<string, unknown> = {
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     delete: vi.fn().mockReturnThis(),
@@ -44,7 +47,7 @@ vi.mock('../../db', () => {
     groupBy: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
-    then: (resolve: any) => resolve([])
+    then: (resolve: (value: unknown[]) => unknown) => resolve([])
   };
   return { db: queryBuilder };
 });
@@ -71,9 +74,21 @@ describe('Fase 8 - Acompanhamento do Responsável e Revisões Trimestrais', () =
       decisoes: 'Decisões tomadas'
     });
     expect(reg.sucesso).toBe(true);
+    const mockedDb = db as unknown as {
+      values: ReturnType<typeof vi.fn>;
+      where: ReturnType<typeof vi.fn>;
+    };
+    expect(mockedDb.values).toHaveBeenCalledWith(expect.objectContaining({
+      estudantePerfilId: 'perfil-1',
+      registradaPorPerfilId: 'responsavel-1'
+    }));
 
     const list = await obterRevisoesTrimestrais();
     expect(Array.isArray(list)).toBe(true);
+    expect(mockedDb.where).toHaveBeenLastCalledWith(and(
+      eq(revisoesTrimestrais.estudantePerfilId, 'perfil-1'),
+      eq(revisoesTrimestrais.registradaPorPerfilId, 'responsavel-1')
+    ));
   });
 
   // CRITÉRIO DE ACEITE: "Painel não expõe granularidade diária, verificado por teste"

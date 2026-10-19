@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { obterGenerosUECE, obterRepertorios, obterRedacoes, registrarRedacao, registrarRepertorio } from './redacoes';
+import { db } from '../../db';
+import { eq } from 'drizzle-orm';
+import { repertorios } from '../../db/schema';
 
 vi.mock('../../lib/authorization', () => ({
   requireAuthenticatedProfile: vi.fn().mockResolvedValue({
@@ -28,7 +31,7 @@ vi.mock('../../lib/authorization', () => ({
 
 // Mock DB
 vi.mock('../../db', () => {
-  const queryBuilder: any = {
+  const queryBuilder: Record<string, unknown> = {
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
     delete: vi.fn().mockReturnThis(),
@@ -43,7 +46,7 @@ vi.mock('../../db', () => {
     groupBy: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
-    then: (resolve: any) => resolve([])
+    then: (resolve: (value: unknown[]) => unknown) => resolve([])
   };
   return { db: queryBuilder };
 });
@@ -64,6 +67,8 @@ describe('Fase 7 - Redações & Repertório Sociocultural', () => {
     const list = await obterRepertorios();
     expect(Array.isArray(list)).toBe(true);
     expect(list.length).toBeGreaterThan(0);
+    const mockedDb = db as unknown as { where: ReturnType<typeof vi.fn> };
+    expect(mockedDb.where).toHaveBeenLastCalledWith(eq(repertorios.perfilId, 'perfil-1'));
   });
 
   it('deve obter redacoes da estudante (mock)', async () => {
@@ -79,6 +84,10 @@ describe('Fase 7 - Redações & Repertório Sociocultural', () => {
       minutosGastos: 60
     });
     expect(res.sucesso).toBe(true);
+    const mockedDb = db as unknown as { values: ReturnType<typeof vi.fn> };
+    expect(mockedDb.values).toHaveBeenLastCalledWith(expect.objectContaining({
+      perfilId: 'perfil-1'
+    }));
   });
 
   it('deve registrar novo repertorio', async () => {
@@ -89,6 +98,10 @@ describe('Fase 7 - Redações & Repertório Sociocultural', () => {
       categoria: 'Sociologia'
     });
     expect(res.sucesso).toBe(true);
+    const mockedDb = db as unknown as { values: ReturnType<typeof vi.fn> };
+    expect(mockedDb.values).toHaveBeenLastCalledWith(expect.objectContaining({
+      perfilId: 'perfil-1'
+    }));
   });
 
 });

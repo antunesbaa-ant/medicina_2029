@@ -1,14 +1,13 @@
 import { getServerSession, type Session } from 'next-auth';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { db } from '../db';
-import { perfis } from '../db/schema';
+import { perfis, responsavelEstudante } from '../db/schema';
 import { authOptions } from './auth-options';
 
 export type Papel = typeof perfis.$inferSelect.papel;
 
 export interface AuthorizedProfile {
   id: string;
-  authUserId: string;
   nome: string;
   email: string | null;
   papel: Papel;
@@ -33,7 +32,6 @@ export class AuthorizationError extends Error {
 
 const authorizedProfileSelection = {
   id: perfis.id,
-  authUserId: perfis.authUserId,
   nome: perfis.nome,
   email: perfis.email,
   papel: perfis.papel
@@ -92,14 +90,16 @@ export function assertOwnership(expectedId: string, actualId: string): void {
   }
 }
 
-export async function requireManagedStudentProfile(): Promise<AuthorizedProfile> {
-  await requireRole('responsavel');
-
+async function loadManagedStudentProfile(responsavelId: string): Promise<AuthorizedProfile> {
   try {
     const estudantes = await db
       .select(authorizedProfileSelection)
-      .from(perfis)
-      .where(eq(perfis.papel, 'estudante'))
+      .from(responsavelEstudante)
+      .innerJoin(perfis, eq(responsavelEstudante.estudantePerfilId, perfis.id))
+      .where(and(
+        eq(responsavelEstudante.responsavelPerfilId, responsavelId),
+        eq(perfis.papel, 'estudante')
+      ))
       .limit(2);
 
     if (estudantes.length !== 1) {
@@ -113,4 +113,23 @@ export async function requireManagedStudentProfile(): Promise<AuthorizedProfile>
     }
     throw new AuthorizationError('FORBIDDEN');
   }
+}
+
+export async function requireManagedStudentProfile(): Promise<AuthorizedProfile> {
+  const responsavel = await requireRole('responsavel');
+  return loadManagedStudentProfile(responsavel.id);
+}
+
+export async function requireStudentScope(): Promise<AuthorizedProfile> {
+  const perfil = await requireAuthenticatedProfile();
+
+  if (perfil.papel === 'estudante') {
+    return perfil;
+  }
+
+  if (perfil.papel === 'responsavel') {
+    return loadManagedStudentProfile(perfil.id);
+  }
+
+  throw new AuthorizationError('FORBIDDEN');
 }

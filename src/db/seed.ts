@@ -9,9 +9,9 @@ import {
   ciclos,
   cicloBlocos,
   cicloEstado,
-  generos
+  generos,
+  responsavelEstudante
 } from './schema';
-import { eq } from 'drizzle-orm';
 import bcrypt from 'bcryptjs';
 
 async function main() {
@@ -26,6 +26,7 @@ async function main() {
     await db.delete(topicos);
     await db.delete(disciplinas);
     await db.delete(generos);
+    await db.delete(responsavelEstudante);
     await db.delete(perfis);
 
     // 2. Seeding Perfis
@@ -51,6 +52,11 @@ async function main() {
     }).returning();
 
     console.log('Perfis criados:', { estudante: estudante.id, responsavel: responsavel.id });
+
+    await db.insert(responsavelEstudante).values({
+      responsavelPerfilId: responsavel.id,
+      estudantePerfilId: estudante.id
+    });
 
     // 3. Seeding Disciplinas
     console.log('Seeding Disciplinas...');
@@ -250,6 +256,7 @@ async function main() {
     
     // Ciclo 2027 (12 blocos)
     const [ciclo2027] = await db.insert(ciclos).values({
+      estudantePerfilId: estudante.id,
       nome: 'Ciclo Padrão — 2027 (1º Ano)',
       anoLetivo: 2027,
       ativo: true,
@@ -290,6 +297,7 @@ async function main() {
 
     // Ciclo 2028 (16 blocos - Conforme o PDF)
     const [ciclo2028] = await db.insert(ciclos).values({
+      estudantePerfilId: estudante.id,
       nome: 'Ciclo Padrão — 2028 (2º Ano)',
       anoLetivo: 2028,
       ativo: false,
@@ -334,6 +342,7 @@ async function main() {
 
     // Ciclo 2029 (28 blocos - Carga de 23 horas)
     const [ciclo2029] = await db.insert(ciclos).values({
+      estudantePerfilId: estudante.id,
       nome: 'Ciclo Padrão — 2029 (3º Ano)',
       anoLetivo: 2029,
       ativo: false,

@@ -1,164 +1,124 @@
 'use server';
 
 import { db } from '../../db';
+import { getTableColumns, type Table } from 'drizzle-orm';
 import {
-  perfis,
-  disciplinas,
-  topicos,
-  materiais,
-  perguntasAtivas,
-  questoes,
-  curadoriaFila,
-  sessoes,
-  ciclos,
-  cicloBlocos,
-  tentativas,
-  erros,
+  acervoArquivos,
+  acervoChunks,
+  acervoFiguras,
+  acervoPaginas,
   cards,
   cardRevisoes,
   checkins,
+  cicloBlocos,
+  cicloEstado,
+  ciclos,
+  curadoriaFila,
+  disciplinas,
+  erros,
+  geracoes,
+  generos,
+  livros,
+  materiais,
+  perfis,
+  perguntasAtivas,
+  questaoTopicos,
+  questoes,
   redacoes,
   repertorios,
-  simulados,
-  simuladoAreas,
-  simuladoAnalise,
+  responsavelEstudante,
   revisoesTrimestrais,
-  livros,
-  generos
+  sessoes,
+  simuladoAnalise,
+  simuladoAreas,
+  simuladoQuestoes,
+  simulados,
+  tentativas,
+  topicos
 } from '../../db/schema';
-import { sql } from 'drizzle-orm';
+import {
+  criarExportacaoSegura,
+  EXPORT_COLLECTION_FIELDS,
+  type ExportCollections,
+  validarExportacaoSegura,
+  type ExportValidationResult
+} from '../../lib/exportacao-segura';
 import { requireRole } from '../../lib/authorization';
 
-export interface BackupData {
-  perfis: any[];
-  generos: any[];
-  disciplinas: any[];
-  topicos: any[];
-  materiais: any[];
-  perguntasAtivas: any[];
-  questoes: any[];
-  curadoriaFila: any[];
-  sessoes: any[];
-  ciclos: any[];
-  cicloBlocos: any[];
-  tentativas: any[];
-  erros: any[];
-  cards: any[];
-  cardRevisoes: any[];
-  checkins: any[];
-  redacoes: any[];
-  repertorios: any[];
-  simulados: any[];
-  simuladoAreas: any[];
-  simuladoAnalise: any[];
-  revisoesTrimestrais: any[];
-  livros: any[];
+function selectAllowedFields<TTable extends Table, TKey extends keyof TTable['_']['columns']>(
+  table: TTable,
+  fields: readonly TKey[]
+): Pick<TTable['_']['columns'], TKey> {
+  const columns = getTableColumns(table);
+  return Object.fromEntries(fields.map((field) => [field, columns[field]])) as Pick<
+    TTable['_']['columns'],
+    TKey
+  >;
 }
 
-// 1. Exportar todos os dados do banco como JSON estruturado
+function toRecords(rows: readonly object[]): Array<Record<string, unknown>> {
+  return rows.map((row) => ({ ...row }));
+}
+
 export async function exportarDadosCompletos(): Promise<string> {
   await requireRole('responsavel');
 
   try {
-    const backup: BackupData = {
-      perfis: await db.select().from(perfis),
-      generos: await db.select().from(generos),
-      disciplinas: await db.select().from(disciplinas),
-      topicos: await db.select().from(topicos),
-      materiais: await db.select().from(materiais),
-      perguntasAtivas: await db.select().from(perguntasAtivas),
-      questoes: await db.select().from(questoes),
-      curadoriaFila: await db.select().from(curadoriaFila),
-      sessoes: await db.select().from(sessoes),
-      ciclos: await db.select().from(ciclos),
-      cicloBlocos: await db.select().from(cicloBlocos),
-      tentativas: await db.select().from(tentativas),
-      erros: await db.select().from(erros),
-      cards: await db.select().from(cards),
-      cardRevisoes: await db.select().from(cardRevisoes),
-      checkins: await db.select().from(checkins),
-      redacoes: await db.select().from(redacoes),
-      repertorios: await db.select().from(repertorios),
-      simulados: await db.select().from(simulados),
-      simuladoAreas: await db.select().from(simuladoAreas),
-      simuladoAnalise: await db.select().from(simuladoAnalise),
-      revisoesTrimestrais: await db.select().from(revisoesTrimestrais),
-      livros: await db.select().from(livros)
+    const dados: ExportCollections = {
+      perfis: toRecords(await db.select(selectAllowedFields(perfis, EXPORT_COLLECTION_FIELDS.perfis)).from(perfis)),
+      responsavelEstudante: toRecords(await db.select(selectAllowedFields(responsavelEstudante, EXPORT_COLLECTION_FIELDS.responsavelEstudante)).from(responsavelEstudante)),
+      generos: toRecords(await db.select(selectAllowedFields(generos, EXPORT_COLLECTION_FIELDS.generos)).from(generos)),
+      disciplinas: toRecords(await db.select(selectAllowedFields(disciplinas, EXPORT_COLLECTION_FIELDS.disciplinas)).from(disciplinas)),
+      topicos: toRecords(await db.select(selectAllowedFields(topicos, EXPORT_COLLECTION_FIELDS.topicos)).from(topicos)),
+      materiais: toRecords(await db.select(selectAllowedFields(materiais, EXPORT_COLLECTION_FIELDS.materiais)).from(materiais)),
+      perguntasAtivas: toRecords(await db.select(selectAllowedFields(perguntasAtivas, EXPORT_COLLECTION_FIELDS.perguntasAtivas)).from(perguntasAtivas)),
+      questoes: toRecords(await db.select(selectAllowedFields(questoes, EXPORT_COLLECTION_FIELDS.questoes)).from(questoes)),
+      questaoTopicos: toRecords(await db.select(selectAllowedFields(questaoTopicos, EXPORT_COLLECTION_FIELDS.questaoTopicos)).from(questaoTopicos)),
+      curadoriaFila: toRecords(await db.select(selectAllowedFields(curadoriaFila, EXPORT_COLLECTION_FIELDS.curadoriaFila)).from(curadoriaFila)),
+      sessoes: toRecords(await db.select(selectAllowedFields(sessoes, EXPORT_COLLECTION_FIELDS.sessoes)).from(sessoes)),
+      ciclos: toRecords(await db.select(selectAllowedFields(ciclos, EXPORT_COLLECTION_FIELDS.ciclos)).from(ciclos)),
+      cicloBlocos: toRecords(await db.select(selectAllowedFields(cicloBlocos, EXPORT_COLLECTION_FIELDS.cicloBlocos)).from(cicloBlocos)),
+      cicloEstado: toRecords(await db.select(selectAllowedFields(cicloEstado, EXPORT_COLLECTION_FIELDS.cicloEstado)).from(cicloEstado)),
+      tentativas: toRecords(await db.select(selectAllowedFields(tentativas, EXPORT_COLLECTION_FIELDS.tentativas)).from(tentativas)),
+      erros: toRecords(await db.select(selectAllowedFields(erros, EXPORT_COLLECTION_FIELDS.erros)).from(erros)),
+      cards: toRecords(await db.select(selectAllowedFields(cards, EXPORT_COLLECTION_FIELDS.cards)).from(cards)),
+      cardRevisoes: toRecords(await db.select(selectAllowedFields(cardRevisoes, EXPORT_COLLECTION_FIELDS.cardRevisoes)).from(cardRevisoes)),
+      checkins: toRecords(await db.select(selectAllowedFields(checkins, EXPORT_COLLECTION_FIELDS.checkins)).from(checkins)),
+      redacoes: toRecords(await db.select(selectAllowedFields(redacoes, EXPORT_COLLECTION_FIELDS.redacoes)).from(redacoes)),
+      repertorios: toRecords(await db.select(selectAllowedFields(repertorios, EXPORT_COLLECTION_FIELDS.repertorios)).from(repertorios)),
+      simulados: toRecords(await db.select(selectAllowedFields(simulados, EXPORT_COLLECTION_FIELDS.simulados)).from(simulados)),
+      simuladoQuestoes: toRecords(await db.select(selectAllowedFields(simuladoQuestoes, EXPORT_COLLECTION_FIELDS.simuladoQuestoes)).from(simuladoQuestoes)),
+      simuladoAreas: toRecords(await db.select(selectAllowedFields(simuladoAreas, EXPORT_COLLECTION_FIELDS.simuladoAreas)).from(simuladoAreas)),
+      simuladoAnalise: toRecords(await db.select(selectAllowedFields(simuladoAnalise, EXPORT_COLLECTION_FIELDS.simuladoAnalise)).from(simuladoAnalise)),
+      revisoesTrimestrais: toRecords(await db.select(selectAllowedFields(revisoesTrimestrais, EXPORT_COLLECTION_FIELDS.revisoesTrimestrais)).from(revisoesTrimestrais)),
+      livros: toRecords(await db.select(selectAllowedFields(livros, EXPORT_COLLECTION_FIELDS.livros)).from(livros)),
+      acervoArquivos: toRecords(await db.select(selectAllowedFields(acervoArquivos, EXPORT_COLLECTION_FIELDS.acervoArquivos)).from(acervoArquivos)),
+      acervoPaginas: toRecords(await db.select(selectAllowedFields(acervoPaginas, EXPORT_COLLECTION_FIELDS.acervoPaginas)).from(acervoPaginas)),
+      acervoChunks: toRecords(await db.select(selectAllowedFields(acervoChunks, EXPORT_COLLECTION_FIELDS.acervoChunks)).from(acervoChunks)),
+      acervoFiguras: toRecords(await db.select(selectAllowedFields(acervoFiguras, EXPORT_COLLECTION_FIELDS.acervoFiguras)).from(acervoFiguras)),
+      geracoes: toRecords(await db.select(selectAllowedFields(geracoes, EXPORT_COLLECTION_FIELDS.geracoes)).from(geracoes))
     };
 
-    return JSON.stringify(backup, null, 2);
-  } catch (error) {
-    console.error('Erro ao gerar export de dados:', error);
+    return JSON.stringify(criarExportacaoSegura(dados), null, 2);
+  } catch {
+    console.error('Falha interna ao gerar exportação administrativa segura.');
     throw new Error('Falha ao exportar base de dados.');
   }
 }
 
-// 2. Restaurar dados em uma base limpa (Critério de Aceite)
-export async function restaurarDadosCompletos(jsonStr: string): Promise<{ sucesso: boolean; mensagem: string }> {
+export async function validarArquivoExportacao(jsonStr: string): Promise<ExportValidationResult> {
   await requireRole('responsavel');
+  return validarExportacaoSegura(jsonStr);
+}
 
-  try {
-    const backup: BackupData = JSON.parse(jsonStr);
+export async function restaurarDadosCompletos(
+  jsonStr: string
+): Promise<{ sucesso: false; mensagem: string }> {
+  await requireRole('responsavel');
+  void jsonStr;
 
-    // Deleta tabelas na ordem correta de chaves estrangeiras
-    await db.transaction(async (tx) => {
-      console.log('Limpando tabelas para restauração de backup...');
-      
-      await tx.delete(simuladoAnalise);
-      await tx.delete(simuladoAreas);
-      await tx.delete(simulados);
-      await tx.delete(cardRevisoes);
-      await tx.delete(cards);
-      await tx.delete(tentativas);
-      await tx.delete(erros);
-      await tx.delete(redacoes);
-      await tx.delete(repertorios);
-      await tx.delete(livros);
-      await tx.delete(checkins);
-      await tx.delete(revisoesTrimestrais);
-      await tx.delete(sessoes);
-      await tx.delete(cicloBlocos);
-      await tx.delete(ciclos);
-      await tx.delete(curadoriaFila);
-      await tx.delete(perguntasAtivas);
-      await tx.delete(questoes);
-      await tx.delete(materiais);
-      await tx.delete(topicos);
-      await tx.delete(disciplinas);
-      await tx.delete(generos);
-      await tx.delete(perfis);
-
-      console.log('Reinserindo dados restaurados...');
-
-      // Insere dados respeitando a ordem de chaves estrangeiras
-      if (backup.perfis?.length) await tx.insert(perfis).values(backup.perfis);
-      if (backup.generos?.length) await tx.insert(generos).values(backup.generos);
-      if (backup.disciplinas?.length) await tx.insert(disciplinas).values(backup.disciplinas);
-      if (backup.topicos?.length) await tx.insert(topicos).values(backup.topicos);
-      if (backup.materiais?.length) await tx.insert(materiais).values(backup.materiais);
-      if (backup.perguntasAtivas?.length) await tx.insert(perguntasAtivas).values(backup.perguntasAtivas);
-      if (backup.questoes?.length) await tx.insert(questoes).values(backup.questoes);
-      if (backup.curadoriaFila?.length) await tx.insert(curadoriaFila).values(backup.curadoriaFila);
-      if (backup.sessoes?.length) await tx.insert(sessoes).values(backup.sessoes);
-      if (backup.ciclos?.length) await tx.insert(ciclos).values(backup.ciclos);
-      if (backup.cicloBlocos?.length) await tx.insert(cicloBlocos).values(backup.cicloBlocos);
-      if (backup.tentativas?.length) await tx.insert(tentativas).values(backup.tentativas);
-      if (backup.erros?.length) await tx.insert(erros).values(backup.erros);
-      if (backup.cards?.length) await tx.insert(cards).values(backup.cards);
-      if (backup.cardRevisoes?.length) await tx.insert(cardRevisoes).values(backup.cardRevisoes);
-      if (backup.checkins?.length) await tx.insert(checkins).values(backup.checkins);
-      if (backup.redacoes?.length) await tx.insert(redacoes).values(backup.redacoes);
-      if (backup.repertorios?.length) await tx.insert(repertorios).values(backup.repertorios);
-      if (backup.simulados?.length) await tx.insert(simulados).values(backup.simulados);
-      if (backup.simuladoAreas?.length) await tx.insert(simuladoAreas).values(backup.simuladoAreas);
-      if (backup.simuladoAnalise?.length) await tx.insert(simuladoAnalise).values(backup.simuladoAnalise);
-      if (backup.revisoesTrimestrais?.length) await tx.insert(revisoesTrimestrais).values(backup.revisoesTrimestrais);
-      if (backup.livros?.length) await tx.insert(livros).values(backup.livros);
-    });
-
-    return { sucesso: true, mensagem: 'Base de dados restaurada com sucesso a partir do backup.' };
-  } catch (error) {
-    console.error('Erro ao restaurar backup:', error);
-    return { sucesso: false, mensagem: 'Falha ao restaurar base de dados.' };
-  }
+  return {
+    sucesso: false,
+    mensagem: 'Restauração indisponível por segurança. O arquivo não foi aplicado.'
+  };
 }

@@ -62,10 +62,14 @@ export async function obterGenerosUECE() {
 
 // 2. Obter Repertório cadastrado
 export async function obterRepertorios() {
-  await requireRole('estudante');
+  const perfil = await requireRole('estudante');
 
   try {
-    const list = await db.select().from(repertorios).orderBy(desc(repertorios.criadoEm));
+    const list = await db
+      .select()
+      .from(repertorios)
+      .where(eq(repertorios.perfilId, perfil.id))
+      .orderBy(desc(repertorios.criadoEm));
 
     if (list.length === 0) {
       return [
@@ -155,10 +159,11 @@ export async function registrarRedacao(dados: RegistrarRedacaoInput): Promise<{ 
 
 // 5. Registrar Repertório Sociocultural
 export async function registrarRepertorio(dados: RegistrarRepertorioInput): Promise<{ sucesso: boolean; mensagem: string }> {
-  await requireRole('estudante');
+  const perfil = await requireRole('estudante');
 
   try {
     await db.insert(repertorios).values({
+      perfilId: perfil.id,
       referencia: dados.referencia,
       resumo2Linhas: dados.resumo2Linhas,
       temasAplicaveis: dados.temasAplicaveis,

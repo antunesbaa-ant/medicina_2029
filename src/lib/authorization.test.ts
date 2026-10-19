@@ -25,12 +25,14 @@ import {
   AuthorizationError,
   requireAuthenticatedProfile,
   requireManagedStudentProfile,
-  requireRole
+  requireRole,
+  requireStudentScope
 } from './authorization';
+
+const estudanteAuthUserId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 
 const estudante = {
   id: '11111111-1111-4111-8111-111111111111',
-  authUserId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   nome: 'Estudante',
   email: 'estudante@example.test',
   papel: 'estudante' as const
@@ -38,7 +40,6 @@ const estudante = {
 
 const responsavel = {
   id: '22222222-2222-4222-8222-222222222222',
-  authUserId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
   nome: 'Responsável',
   email: 'responsavel@example.test',
   papel: 'responsavel' as const
@@ -54,13 +55,14 @@ describe('authorization', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.queryResults.length = 0;
-    mocks.select.mockImplementation(() => ({
-      from: () => ({
-        where: () => ({
-          limit: async () => mocks.queryResults.shift() ?? []
-        })
-      })
-    }));
+    mocks.select.mockImplementation(() => {
+      const query = {
+        innerJoin: () => query,
+        where: () => query,
+        limit: async () => mocks.queryResults.shift() ?? []
+      };
+      return { from: () => query };
+    });
   });
 
   it('nega quando não existe sessão sem consultar o banco', async () => {
@@ -79,10 +81,11 @@ describe('authorization', () => {
 
     await expect(requireAuthenticatedProfile()).resolves.toEqual(estudante);
     expect(mocks.select).toHaveBeenCalledOnce();
+    expect(mocks.select.mock.calls[0][0]).not.toHaveProperty('authUserId');
   });
 
   it('nega sessão cujo id não corresponde a um perfil', async () => {
-    setSession(estudante.authUserId);
+    setSession(estudanteAuthUserId);
     mocks.queryResults.push([]);
 
     await expect(requireAuthenticatedProfile()).rejects.toMatchObject({
@@ -136,10 +139,26 @@ describe('authorization', () => {
     await expect(requireManagedStudentProfile()).resolves.toEqual(estudante);
   });
 
+  it('mantém a própria identidade da estudante como escopo estudantil', async () => {
+    setSession(estudante.id, 'estudante');
+    mocks.queryResults.push([estudante]);
+
+    await expect(requireStudentScope()).resolves.toEqual(estudante);
+    expect(mocks.select).toHaveBeenCalledOnce();
+  });
+
+  it('resolve o escopo estudantil do responsável exclusivamente pelo vínculo', async () => {
+    setSession(responsavel.id, 'responsavel');
+    mocks.queryResults.push([responsavel], [estudante]);
+
+    await expect(requireStudentScope()).resolves.toEqual(estudante);
+    expect(mocks.select).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ['nenhum', []],
     ['mais de um', [estudante, { ...estudante, id: '33333333-3333-4333-8333-333333333333' }]]
-  ])('nega quando existe %s perfil estudante gerenciado', async (_cenario, estudantes) => {
+  ])('nega sem fallback global quando existe %s vínculo de estudante gerenciado', async (_cenario, estudantes) => {
     setSession(responsavel.id, 'responsavel');
     mocks.queryResults.push([responsavel], estudantes);
 
