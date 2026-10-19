@@ -1,20 +1,22 @@
 'use server';
 
 import { db } from '../../db';
-import { sessoes, cicloBlocos, cicloEstado, erros, questoes } from '../../db/schema';
-import { eq } from 'drizzle-orm';
+import { sessoes, cicloBlocos, cicloEstado, erros, questoes, tentativas } from '../../db/schema';
+import { and, eq } from 'drizzle-orm';
 import { validarConclusaoSessao, calcularProximaOrdem } from '../../lib/studysystem';
+import { requireRole } from '../../lib/authorization';
 
 export async function iniciarSessao(
-  perfilId: string,
   cicloBlocoId: string,
   topicoId: string
 ): Promise<string> {
+  const perfil = await requireRole('estudante');
+
   try {
     const [sessaoInserida] = await db
       .insert(sessoes)
       .values({
-        perfilId,
+        perfilId: perfil.id,
         cicloBlocoId,
         topicoId,
         iniciadaEm: new Date(),
@@ -31,9 +33,8 @@ export async function iniciarSessao(
 
     return sessaoInserida.id;
   } catch (error) {
-    console.warn('Banco offline ou indisponível ao iniciar sessão. Usando mock.');
-    // Retorna um ID de sessão mockado
-    return `sessao-mock-${Date.now()}`;
+    console.error('Erro ao iniciar sessão:', error);
+    throw new Error('Não foi possível iniciar a sessão.');
   }
 }
 
@@ -48,6 +49,8 @@ export async function atualizarSessao(
   sessaoId: string,
   dados: DadosAtualizacaoSessao
 ): Promise<typeof sessoes.$inferSelect> {
+  const perfil = await requireRole('estudante');
+
   try {
     const [sessaoAtualizada] = await db
       .update(sessoes)
@@ -57,29 +60,17 @@ export async function atualizarSessao(
         ...(dados.segundosPausa !== undefined && { segundosPausa: dados.segundosPausa }),
         ...(dados.notaLivre !== undefined && { notaLivre: dados.notaLivre }),
       })
-      .where(eq(sessoes.id, sessaoId))
+      .where(and(eq(sessoes.id, sessaoId), eq(sessoes.perfilId, perfil.id)))
       .returning();
 
     if (!sessaoAtualizada) {
-      throw new Error(`Sessão ${sessaoId} não encontrada para atualização`);
+      throw new Error('Sessão não encontrada ou acesso não permitido.');
     }
 
     return sessaoAtualizada;
   } catch (error) {
-    console.warn('Banco offline ao atualizar sessão. Usando mock.');
-    return {
-      id: sessaoId,
-      perfilId: '00000000-0000-0000-0000-000000000001',
-      cicloBlocoId: 'b-1',
-      topicoId: 't-mat-1',
-      iniciadaEm: new Date(),
-      encerradaEm: null,
-      segundosEfetivos: dados.segundosEfetivos ?? 0,
-      segundosPausa: dados.segundosPausa ?? 0,
-      etapaAtingida: dados.etapaAtingida ?? 'revisao',
-      concluida: false,
-      notaLivre: dados.notaLivre ?? null,
-    };
+    console.error('Erro ao atualizar sessão:', error);
+    throw new Error('Não foi possível atualizar a sessão.');
   }
 }
 
@@ -104,6 +95,8 @@ export async function concluirSessao(
   sessaoId: string,
   dadosFinalizacao: DadosFinalizacaoSessao
 ): Promise<typeof sessoes.$inferSelect> {
+  const perfil = await requireRole('estudante');
+
   try {
     // 1. Busca a sessão e seu bloco para obter dados de referência (perfilId, cicloBlocoId, etc.)
     const [dadosSessao] = await db
@@ -112,18 +105,46 @@ export async function concluirSessao(
         bloco: cicloBlocos,
       })
       .from(sessoes)
-      .where(eq(sessoes.id, sessaoId))
+      .where(and(eq(sessoes.id, sessaoId), eq(sessoes.perfilId, perfil.id)))
       .innerJoin(cicloBlocos, eq(sessoes.cicloBlocoId, cicloBlocos.id))
       .limit(1);
 
     if (!dadosSessao) {
-      throw new Error(`Sessão ${sessaoId} não encontrada ou sem bloco correspondente`);
+      throw new Error('Sessão não encontrada ou acesso não permitido.');
     }
 
     const { sessao, bloco } = dadosSessao;
 
     // 2. Valida conclusão de acordo com a etapa atingida
     const concluida = validarConclusaoSessao(dadosFinalizacao.etapaAtingida);
+
+    const errosValidados: Array<ErroParaRegistrar & { disciplinaId: string; estilo: 'enem' | 'conteudista' | 'misto' }> = [];
+    for (const erro of dadosFinalizacao.errosParaRegistrar ?? []) {
+      const [questao] = await db
+        .select({ disciplinaId: questoes.disciplinaId, estilo: questoes.estilo })
+        .from(questoes)
+        .where(eq(questoes.id, erro.questaoId))
+        .limit(1);
+
+      const [tentativa] = await db
+        .select({ id: tentativas.id })
+        .from(tentativas)
+        .where(
+          and(
+            eq(tentativas.id, erro.tentativaId),
+            eq(tentativas.perfilId, perfil.id),
+            eq(tentativas.sessaoId, sessaoId),
+            eq(tentativas.questaoId, erro.questaoId)
+          )
+        )
+        .limit(1);
+
+      if (!questao || !tentativa) {
+        throw new Error('Registro relacionado não encontrado ou acesso não permitido.');
+      }
+
+      errosValidados.push({ ...erro, ...questao });
+    }
 
     // 3. Atualiza os dados da sessão no banco
     const [sessaoConcluida] = await db
@@ -136,34 +157,20 @@ export async function concluirSessao(
         notaLivre: dadosFinalizacao.notaLivre ?? sessao.notaLivre,
         concluida,
       })
-      .where(eq(sessoes.id, sessaoId))
+      .where(and(eq(sessoes.id, sessaoId), eq(sessoes.perfilId, perfil.id)))
       .returning();
 
     // 4. Registra os erros, se houver
-    if (dadosFinalizacao.errosParaRegistrar && dadosFinalizacao.errosParaRegistrar.length > 0) {
-      for (const erro of dadosFinalizacao.errosParaRegistrar) {
-        // Busca a questão para obter a disciplinaId e estilo
-        const [questao] = await db
-          .select({
-            disciplinaId: questoes.disciplinaId,
-            estilo: questoes.estilo,
-          })
-          .from(questoes)
-          .where(eq(questoes.id, erro.questaoId))
-          .limit(1);
-
-        if (!questao) {
-          throw new Error(`Questão ${erro.questaoId} não encontrada para o registro de erro`);
-        }
-
+    if (errosValidados.length > 0) {
+      for (const erro of errosValidados) {
         await db.insert(erros).values({
-          perfilId: sessao.perfilId,
+          perfilId: perfil.id,
           questaoId: erro.questaoId,
           tentativaId: erro.tentativaId,
           descricaoLivre: erro.descricaoLivre || null,
-          disciplinaId: questao.disciplinaId,
+          disciplinaId: erro.disciplinaId,
           topicoId: sessao.topicoId,
-          estilo: questao.estilo,
+          estilo: erro.estilo,
           tipoErro: erro.tipoErro,
           conceitoCorreto: erro.conceitoCorreto || null,
           criadoEm: new Date(),
@@ -195,21 +202,8 @@ export async function concluirSessao(
 
     return sessaoConcluida;
   } catch (error) {
-    console.warn('Banco offline ao concluir sessão. Usando mock.');
-    const concluida = validarConclusaoSessao(dadosFinalizacao.etapaAtingida);
-    return {
-      id: sessaoId,
-      perfilId: '00000000-0000-0000-0000-000000000001',
-      cicloBlocoId: 'b-1',
-      topicoId: 't-mat-1',
-      iniciadaEm: new Date(Date.now() - 3600 * 1000),
-      encerradaEm: dadosFinalizacao.encerradaEm || new Date(),
-      segundosEfetivos: dadosFinalizacao.segundosEfetivos ?? 3000,
-      segundosPausa: dadosFinalizacao.segundosPausa ?? 0,
-      etapaAtingida: dadosFinalizacao.etapaAtingida,
-      concluida,
-      notaLivre: dadosFinalizacao.notaLivre ?? null,
-    };
+    console.error('Erro ao concluir sessão:', error);
+    throw new Error('Não foi possível concluir a sessão.');
   }
 }
 

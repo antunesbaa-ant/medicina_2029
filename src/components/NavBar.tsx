@@ -323,8 +323,14 @@ export default function NavBar() {
       ),
     },
   ].filter(item => {
-    if (['/acervo', '/curadoria', '/responsavel'].includes(item.path)) {
+    const rotasResponsavel = ['/acervo', '/curadoria', '/lacunas', '/responsavel'];
+    const rotasEstudante = ['/', '/estudar', '/ciclo', '/redacoes', '/caderno-erros', '/simulados'];
+
+    if (rotasResponsavel.includes(item.path)) {
       return userRole === 'responsavel';
+    }
+    if (rotasEstudante.includes(item.path)) {
+      return userRole !== 'responsavel';
     }
     return true;
   });

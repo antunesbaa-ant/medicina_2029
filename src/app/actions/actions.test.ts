@@ -2,6 +2,31 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { obterCicloAtivo, iniciarCicloEstudos, resetarPlanejamento } from './ciclo';
 import { iniciarSessao, atualizarSessao, concluirSessao } from './sessao';
 
+vi.mock('../../lib/authorization', () => ({
+  requireAuthenticatedProfile: vi.fn().mockResolvedValue({
+    id: 'perfil-1',
+    authUserId: 'auth-1',
+    nome: 'Estudante Teste',
+    email: null,
+    papel: 'estudante',
+  }),
+  requireRole: vi.fn().mockResolvedValue({
+    id: 'perfil-1',
+    authUserId: 'auth-1',
+    nome: 'Estudante Teste',
+    email: null,
+    papel: 'estudante',
+  }),
+  requireManagedStudentProfile: vi.fn().mockResolvedValue({
+    id: 'perfil-1',
+    authUserId: 'auth-1',
+    nome: 'Estudante Teste',
+    email: null,
+    papel: 'estudante',
+  }),
+  assertOwnership: vi.fn(),
+}));
+
 // Estado global de mocks de consulta
 let selectCallsCount = 0;
 let selectMockedOutputs: any[] = [];
@@ -175,7 +200,7 @@ describe('Server Actions - Fase 1', () => {
         [sessaoCriada],
       ];
 
-      const idSessao = await iniciarSessao('perfil-1', 'bloco-1', 'topico-1');
+      const idSessao = await iniciarSessao('bloco-1', 'topico-1');
       expect(idSessao).toBe('sessao-123');
       expect(insertCallsCount).toBe(1);
     });

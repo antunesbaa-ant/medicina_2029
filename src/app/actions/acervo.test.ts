@@ -2,6 +2,35 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { enviarArquivo, listarArquivosAcervo, obterAcervoStatus } from './acervo';
 import { buscarNoAcervo } from './busca';
 
+vi.mock('../../lib/authorization', () => ({
+  requireAuthenticatedProfile: vi.fn().mockResolvedValue({
+    id: 'responsavel-1',
+    authUserId: 'auth-responsavel-1',
+    nome: 'Responsável Teste',
+    email: null,
+    papel: 'responsavel',
+  }),
+  requireRole: vi.fn().mockResolvedValue({
+    id: 'responsavel-1',
+    authUserId: 'auth-responsavel-1',
+    nome: 'Responsável Teste',
+    email: null,
+    papel: 'responsavel',
+  }),
+  requireManagedStudentProfile: vi.fn().mockResolvedValue({
+    id: 'perfil-1',
+    authUserId: 'auth-1',
+    nome: 'Estudante Teste',
+    email: null,
+    papel: 'estudante',
+  }),
+  assertOwnership: vi.fn(),
+}));
+
+vi.mock('../../lib/supabaseStorage', () => ({
+  uploadToSupabaseStorage: vi.fn().mockResolvedValue('acervo/mock-file-id.pdf'),
+}));
+
 // Mock pdf-parse
 vi.mock('pdf-parse', () => {
   return {
@@ -46,8 +75,7 @@ describe('Acervo e Ingestão - Server Actions', () => {
         1,
         'enem',
         'teste.pdf',
-        Buffer.from('dummy').toString('base64'),
-        'perfil-1'
+        Buffer.from('dummy').toString('base64')
       );
 
       expect(result.sucesso).toBe(true);

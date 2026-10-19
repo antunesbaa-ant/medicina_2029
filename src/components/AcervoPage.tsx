@@ -5,7 +5,6 @@ import { enviarArquivo, listarArquivosAcervo, obterAcervoStatus, listarDisciplin
 import { obterCicloAtivo } from '../app/actions/ciclo';
 
 export default function AcervoPage() {
-  const [perfilId, setPerfilId] = useState<string>('00000000-0000-0000-0000-000000000002'); // Bruno (Responsável)
   const [disciplinas, setDisciplinas] = useState<Array<{ id: string; nome: string }>>([]);
   const [selectedDisciplina, setSelectedDisciplina] = useState<string>('');
   const [titulo, setTitulo] = useState<string>('');
@@ -127,8 +126,7 @@ export default function AcervoPage() {
           serieAlvo,
           vestibular,
           file.name,
-          base64Data,
-          perfilId
+          base64Data
         );
 
         if (res.sucesso) {

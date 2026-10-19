@@ -3,6 +3,7 @@
 import { db } from '../../db';
 import { simulados, simuladoAreas, simuladoAnalise, topicos } from '../../db/schema';
 import { eq, desc } from 'drizzle-orm';
+import { requireRole } from '../../lib/authorization';
 
 export interface SimuladoAreaInput {
   area: string; // Ex: Linguagens, Matemática, Natureza, Humanas
@@ -22,10 +23,17 @@ export interface RegistrarSimuladoInput {
 
 // 1. Listar simulados e suas análises
 export async function listarSimulados() {
+  const perfil = await requireRole('estudante');
+
+  return listarSimuladosDoPerfil(perfil.id);
+}
+
+async function listarSimuladosDoPerfil(perfilId: string) {
   try {
     const list = await db
       .select()
       .from(simulados)
+      .where(eq(simulados.perfilId, perfilId))
       .orderBy(desc(simulados.data));
 
     const results = [];
@@ -56,11 +64,11 @@ export async function listarSimulados() {
 }
 
 export async function registrarSimulado(dados: RegistrarSimuladoInput): Promise<{ sucesso: boolean; mensagem: string; simuladoId?: string }> {
-  try {
-    const estudantePerfilId = '00000000-0000-0000-0000-000000000001'; // Maria
+  const perfil = await requireRole('estudante');
 
+  try {
     // Trava de simulados: impede novo simulado com análise pendente
-    const simuladosExistentes = await listarSimulados();
+    const simuladosExistentes = await listarSimuladosDoPerfil(perfil.id);
     const temPendente = simuladosExistentes.some(s => !s.analise || !s.analise.concluida);
     if (temPendente) {
       return {
@@ -73,7 +81,7 @@ export async function registrarSimulado(dados: RegistrarSimuladoInput): Promise<
     const [novoSimulado] = await db
       .insert(simulados)
       .values({
-        perfilId: estudantePerfilId,
+        perfilId: perfil.id,
         formato: dados.formato,
         data: new Date(dados.data),
         condicoesReais: dados.condicoesReais,
@@ -143,9 +151,9 @@ export async function registrarSimulado(dados: RegistrarSimuladoInput): Promise<
       mensagem: 'Simulado registrado e análise de lacunas concluída com sucesso.',
       simuladoId: novoSimulado.id
     };
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao registrar simulado:', error);
-    return { sucesso: false, mensagem: error.message || 'Erro ao registrar simulado.' };
+    return { sucesso: false, mensagem: 'Erro ao registrar simulado.' };
   }
 }
 

@@ -27,6 +27,7 @@ import {
   generos
 } from '../../db/schema';
 import { sql } from 'drizzle-orm';
+import { requireRole } from '../../lib/authorization';
 
 export interface BackupData {
   perfis: any[];
@@ -56,6 +57,8 @@ export interface BackupData {
 
 // 1. Exportar todos os dados do banco como JSON estruturado
 export async function exportarDadosCompletos(): Promise<string> {
+  await requireRole('responsavel');
+
   try {
     const backup: BackupData = {
       perfis: await db.select().from(perfis),
@@ -92,6 +95,8 @@ export async function exportarDadosCompletos(): Promise<string> {
 
 // 2. Restaurar dados em uma base limpa (Critério de Aceite)
 export async function restaurarDadosCompletos(jsonStr: string): Promise<{ sucesso: boolean; mensagem: string }> {
+  await requireRole('responsavel');
+
   try {
     const backup: BackupData = JSON.parse(jsonStr);
 
@@ -152,8 +157,8 @@ export async function restaurarDadosCompletos(jsonStr: string): Promise<{ sucess
     });
 
     return { sucesso: true, mensagem: 'Base de dados restaurada com sucesso a partir do backup.' };
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao restaurar backup:', error);
-    return { sucesso: false, mensagem: error.message || 'Falha ao restaurar base de dados.' };
+    return { sucesso: false, mensagem: 'Falha ao restaurar base de dados.' };
   }
 }

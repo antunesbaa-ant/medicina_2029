@@ -3,6 +3,7 @@
 import { db } from '../../db';
 import { redacoes, generos, repertorios } from '../../db/schema';
 import { eq, desc } from 'drizzle-orm';
+import { requireRole } from '../../lib/authorization';
 
 export interface RegistrarRedacaoInput {
   formato: 'enem' | 'genero_uece';
@@ -21,6 +22,8 @@ export interface RegistrarRepertorioInput {
 
 // 1. Obter todos os Gêneros UECE cadastrados
 export async function obterGenerosUECE() {
+  await requireRole('estudante');
+
   try {
     const list = await db.select().from(generos);
     
@@ -59,6 +62,8 @@ export async function obterGenerosUECE() {
 
 // 2. Obter Repertório cadastrado
 export async function obterRepertorios() {
+  await requireRole('estudante');
+
   try {
     const list = await db.select().from(repertorios).orderBy(desc(repertorios.criadoEm));
 
@@ -92,9 +97,9 @@ export async function obterRepertorios() {
 
 // 3. Obter redações escritas pela estudante
 export async function obterRedacoes() {
+  const perfil = await requireRole('estudante');
+
   try {
-    const estudantePerfilId = '00000000-0000-0000-0000-000000000001'; // Maria
-    
     const list = await db
       .select({
         id: redacoes.id,
@@ -108,7 +113,7 @@ export async function obterRedacoes() {
       })
       .from(redacoes)
       .leftJoin(generos, eq(redacoes.generoId, generos.id))
-      .where(eq(redacoes.perfilId, estudantePerfilId))
+      .where(eq(redacoes.perfilId, perfil.id))
       .orderBy(desc(redacoes.escritaEm));
 
     return list;
@@ -120,13 +125,13 @@ export async function obterRedacoes() {
 
 // 4. Registrar nova Redação
 export async function registrarRedacao(dados: RegistrarRedacaoInput): Promise<{ sucesso: boolean; mensagem: string; redacaoId?: string }> {
-  try {
-    const estudantePerfilId = '00000000-0000-0000-0000-000000000001'; // Maria
+  const perfil = await requireRole('estudante');
 
+  try {
     const [nova] = await db
       .insert(redacoes)
       .values({
-        perfilId: estudantePerfilId,
+        perfilId: perfil.id,
         formato: dados.formato,
         generoId: dados.generoId || null,
         tema: dados.tema,
@@ -142,14 +147,16 @@ export async function registrarRedacao(dados: RegistrarRedacaoInput): Promise<{ 
       mensagem: 'Redação registrada com sucesso no painel de acompanhamento.',
       redacaoId: nova.id
     };
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao registrar redação:', error);
-    return { sucesso: false, mensagem: error.message || 'Erro ao salvar redação.' };
+    return { sucesso: false, mensagem: 'Erro ao salvar redação.' };
   }
 }
 
 // 5. Registrar Repertório Sociocultural
 export async function registrarRepertorio(dados: RegistrarRepertorioInput): Promise<{ sucesso: boolean; mensagem: string }> {
+  await requireRole('estudante');
+
   try {
     await db.insert(repertorios).values({
       referencia: dados.referencia,
@@ -159,8 +166,8 @@ export async function registrarRepertorio(dados: RegistrarRepertorioInput): Prom
     });
 
     return { sucesso: true, mensagem: 'Repertório sociocultural adicionado à sua base de consulta.' };
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao registrar repertório:', error);
-    return { sucesso: false, mensagem: error.message || 'Erro ao salvar repertório.' };
+    return { sucesso: false, mensagem: 'Erro ao salvar repertório.' };
   }
 }

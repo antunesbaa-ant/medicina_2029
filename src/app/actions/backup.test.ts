@@ -1,6 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { exportarDadosCompletos, restaurarDadosCompletos } from './backup';
 
+vi.mock('../../lib/authorization', () => ({
+  requireAuthenticatedProfile: vi.fn().mockResolvedValue({
+    id: 'responsavel-1',
+    authUserId: 'auth-responsavel-1',
+    nome: 'Responsável Teste',
+    email: null,
+    papel: 'responsavel',
+  }),
+  requireRole: vi.fn().mockResolvedValue({
+    id: 'responsavel-1',
+    authUserId: 'auth-responsavel-1',
+    nome: 'Responsável Teste',
+    email: null,
+    papel: 'responsavel',
+  }),
+  requireManagedStudentProfile: vi.fn().mockResolvedValue({
+    id: 'perfil-1',
+    authUserId: 'auth-1',
+    nome: 'Estudante Teste',
+    email: null,
+    papel: 'estudante',
+  }),
+  assertOwnership: vi.fn(),
+}));
+
 // Mock DB
 vi.mock('../../db', () => {
   const queryBuilder: any = {

@@ -3,6 +3,7 @@
 import { db } from '../../db';
 import { erros, topicos, disciplinas, materiais, questoes } from '../../db/schema';
 import { eq, sql, desc, and } from 'drizzle-orm';
+import { requireManagedStudentProfile, requireRole } from '../../lib/authorization';
 
 export interface LacunaData {
   topicoId: string;
@@ -17,6 +18,9 @@ export interface LacunaData {
 
 // 1. Obter Painel de Lacunas
 export async function obterLacunasEstudo(): Promise<LacunaData[]> {
+  await requireRole('responsavel');
+  const estudante = await requireManagedStudentProfile();
+
   try {
     // Busca contagem de erros agrupados por tópico
     const errosPorTopico = await db
@@ -27,6 +31,7 @@ export async function obterLacunasEstudo(): Promise<LacunaData[]> {
         tipoErroFrequente: sql<string>`mode() within group (order by ${erros.tipoErro})`
       })
       .from(erros)
+      .where(eq(erros.perfilId, estudante.id))
       .groupBy(erros.topicoId)
       .orderBy(desc(sql`count(${erros.id})`))
       .limit(10);
@@ -130,6 +135,8 @@ export async function obterLacunasEstudo(): Promise<LacunaData[]> {
 
 // 2. Obter resumo aprovado para o tópico
 export async function obterResumoAprovado(topicoId: string) {
+  await requireRole('responsavel');
+
   const [resumo] = await db
     .select()
     .from(materiais)

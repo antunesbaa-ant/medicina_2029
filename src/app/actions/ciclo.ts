@@ -4,6 +4,7 @@ import { db } from '../../db';
 import { ciclos, cicloBlocos, cicloEstado, disciplinas, topicos } from '../../db/schema';
 import { eq, asc } from 'drizzle-orm';
 import { MOCK_CICLO_ATIVO, MOCK_BLOCOS, MOCK_TOPICOS } from '../../lib/mocks';
+import { requireAuthenticatedProfile, requireRole } from '../../lib/authorization';
 
 export interface CicloAtivoData {
   ciclo: typeof ciclos.$inferSelect;
@@ -14,6 +15,8 @@ export interface CicloAtivoData {
 }
 
 export async function obterCicloAtivo(): Promise<CicloAtivoData | null> {
+  await requireAuthenticatedProfile();
+
   try {
     // 1. Busca o ciclo ativo
     const [cicloAtivo] = await db
@@ -74,6 +77,8 @@ export async function obterCicloAtivo(): Promise<CicloAtivoData | null> {
 }
 
 export async function obterTopicosPorDisciplina(disciplinaId: string) {
+  await requireAuthenticatedProfile();
+
   try {
     const list = await db
       .select()
@@ -89,6 +94,8 @@ export async function obterTopicosPorDisciplina(disciplinaId: string) {
 }
 
 export async function iniciarCicloEstudos(): Promise<{ sucesso: boolean; mensagem: string; cicloId?: string }> {
+  await requireRole('responsavel');
+
   try {
     return await db.transaction(async (tx) => {
       // 1. Set all existing cycles to active=false
@@ -193,16 +200,18 @@ export async function iniciarCicloEstudos(): Promise<{ sucesso: boolean; mensage
         cicloId: novoCiclo.id
       };
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao iniciar ciclo de estudos:', error);
     return {
       sucesso: false,
-      mensagem: error.message || 'Erro interno ao iniciar ciclo de estudos.'
+      mensagem: 'Erro interno ao iniciar ciclo de estudos.'
     };
   }
 }
 
 export async function resetarPlanejamento(): Promise<{ sucesso: boolean; mensagem: string }> {
+  await requireRole('responsavel');
+
   try {
     return await db.transaction(async (tx) => {
       // 1. Set all cycles to active=false
@@ -218,11 +227,11 @@ export async function resetarPlanejamento(): Promise<{ sucesso: boolean; mensage
         mensagem: 'Planejamento resetado com sucesso. Nenhum ciclo está ativo.'
       };
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao resetar planejamento:', error);
     return {
       sucesso: false,
-      mensagem: error.message || 'Erro interno ao resetar planejamento.'
+      mensagem: 'Erro interno ao resetar planejamento.'
     };
   }
 }

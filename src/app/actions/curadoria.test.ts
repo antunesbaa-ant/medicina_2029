@@ -5,6 +5,32 @@ import { obterCadernoErros, resolverErro } from './cadernoErros';
 import { injetarTopicoNoCiclo } from './reestudo';
 import { listarSimulados } from './simulados';
 
+vi.mock('../../lib/authorization', () => {
+  const estudante = {
+    id: 'perfil-1',
+    authUserId: 'auth-1',
+    nome: 'Estudante Teste',
+    email: null,
+    papel: 'estudante',
+  };
+  const responsavel = {
+    id: 'responsavel-1',
+    authUserId: 'auth-responsavel-1',
+    nome: 'Responsável Teste',
+    email: null,
+    papel: 'responsavel',
+  };
+
+  return {
+    requireAuthenticatedProfile: vi.fn().mockResolvedValue(estudante),
+    requireRole: vi.fn().mockImplementation(async (role: string) => (
+      role === 'responsavel' ? responsavel : estudante
+    )),
+    requireManagedStudentProfile: vi.fn().mockResolvedValue(estudante),
+    assertOwnership: vi.fn(),
+  };
+});
+
 // Mock DB
 vi.mock('../../db', () => {
   const queryBuilder: any = {

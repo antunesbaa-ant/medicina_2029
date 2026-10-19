@@ -3,12 +3,15 @@
 import { db } from '../../db';
 import { cicloBlocos, cicloEstado, ciclos, topicos } from '../../db/schema';
 import { eq, and, gte, sql } from 'drizzle-orm';
+import { requireRole } from '../../lib/authorization';
 
 // 1. Injetar Re-estudo de um tópico crítico como o próximo bloco do ciclo
 export async function injetarTopicoNoCiclo(
   topicoId: string,
   duracaoMin: number = 50
 ): Promise<{ sucesso: boolean; mensagem: string }> {
+  await requireRole('estudante');
+
   try {
     // A. Busca o tópico para descobrir a disciplinaId
     const [topico] = await db
@@ -69,8 +72,8 @@ export async function injetarTopicoNoCiclo(
       sucesso: true,
       mensagem: `Tópico "${topico.nome}" injetado com sucesso como o próximo bloco da sua fila de estudos!`
     };
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao injetar re-estudo no ciclo:', error);
-    return { sucesso: false, mensagem: error.message || 'Erro ao injetar bloco.' };
+    return { sucesso: false, mensagem: 'Erro ao injetar bloco.' };
   }
 }

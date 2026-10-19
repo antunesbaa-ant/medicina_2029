@@ -2,10 +2,11 @@
 
 import { db } from '../../db';
 import { acervoArquivos, acervoPaginas, acervoChunks, disciplinas } from '../../db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { extrairTextoPDF, segmentarTexto, classificarTópicoChunk, gerarMockEmbedding } from '../../lib/ingestion';
 import crypto from 'crypto';
 import { uploadToSupabaseStorage } from '../../lib/supabaseStorage';
+import { requireAuthenticatedProfile, requireRole } from '../../lib/authorization';
 
 export interface UploadResultado {
   sucesso: boolean;
@@ -22,9 +23,10 @@ export async function enviarArquivo(
   serieAlvo: number,
   vestibular: string,
   nomeArquivo: string,
-  base64Data: string, // Recebe em base64 para facilitar trânsito
-  perfilId: string
+  base64Data: string // Recebe em base64 para facilitar trânsito
 ): Promise<UploadResultado> {
+  const perfil = await requireRole('responsavel');
+
   try {
     const fileBuffer = Buffer.from(base64Data, 'base64');
     const hash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
@@ -68,7 +70,7 @@ export async function enviarArquivo(
         filePath,
         mime: 'application/pdf',
         tamanhoBytes: fileBuffer.length,
-        enviadoPor: perfilId,
+        enviadoPor: perfil.id,
         statusProcessamento: 'aguardando',
         hashConteudo: hash
       })
@@ -84,11 +86,11 @@ export async function enviarArquivo(
       mensagem: 'Arquivo enviado com sucesso. Processamento iniciado na fila.',
       arquivoId: novoArquivo.id
     };
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro no upload de arquivo:', error);
     return {
       sucesso: false,
-      mensagem: error.message || 'Erro interno ao fazer upload do arquivo.'
+      mensagem: 'Erro interno ao fazer upload do arquivo.'
     };
   }
 }
@@ -166,13 +168,13 @@ async function processarArquivoPipeline(arquivoId: string, fileBuffer: Buffer) {
       .set({ statusProcessamento: 'concluido' })
       .where(eq(acervoArquivos.id, arquivoId));
 
-  } catch (error: any) {
+  } catch (error) {
     console.error(`Erro no pipeline para o arquivo ${arquivoId}:`, error);
     await db
       .update(acervoArquivos)
       .set({ 
         statusProcessamento: 'falhou',
-        erroProcessamento: error.message || 'Erro desconhecido'
+        erroProcessamento: 'Falha no processamento do arquivo.'
       })
       .where(eq(acervoArquivos.id, arquivoId));
   }
@@ -180,10 +182,15 @@ async function processarArquivoPipeline(arquivoId: string, fileBuffer: Buffer) {
 
 // 3. Obter status do arquivo
 export async function obterAcervoStatus(arquivoId: string) {
+  const perfil = await requireRole('responsavel');
+
   const [arquivo] = await db
     .select()
     .from(acervoArquivos)
-    .where(eq(acervoArquivos.id, arquivoId))
+    .where(and(
+      eq(acervoArquivos.id, arquivoId),
+      eq(acervoArquivos.enviadoPor, perfil.id)
+    ))
     .limit(1);
 
   if (!arquivo) return null;
@@ -202,15 +209,22 @@ export async function obterAcervoStatus(arquivoId: string) {
 
 // 4. Listar arquivos do acervo
 export async function listarArquivosAcervo(disciplinaId?: string) {
+  const perfil = await requireRole('responsavel');
+
   return await db
     .select()
     .from(acervoArquivos)
-    .where(disciplinaId ? eq(acervoArquivos.disciplinaId, disciplinaId) : undefined)
+    .where(and(
+      eq(acervoArquivos.enviadoPor, perfil.id),
+      disciplinaId ? eq(acervoArquivos.disciplinaId, disciplinaId) : undefined
+    ))
     .orderBy(acervoArquivos.enviadoEm);
 }
 
 // 5. Obter todas as disciplinas
 export async function listarDisciplinas() {
+  await requireAuthenticatedProfile();
+
   return await db
     .select({ id: disciplinas.id, nome: disciplinas.nome })
     .from(disciplinas)

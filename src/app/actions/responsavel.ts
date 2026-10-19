@@ -3,6 +3,7 @@
 import { db } from '../../db';
 import { checkins, sessoes, redacoes, cards, revisoesTrimestrais } from '../../db/schema';
 import { eq, and, gte, sql, desc } from 'drizzle-orm';
+import { requireManagedStudentProfile, requireRole } from '../../lib/authorization';
 
 export interface QuinzenaResumo {
   periodoRotulo: string;
@@ -22,8 +23,11 @@ export interface RevisaoTrimestralInput {
 
 // 1. Obter Acompanhamento Quinzenal (Agregado - Sem granularidade diária)
 export async function obterAcompanhamentoQuinzenal(): Promise<QuinzenaResumo[]> {
+  await requireRole('responsavel');
+  const estudante = await requireManagedStudentProfile();
+
   try {
-    const estudantePerfilId = '00000000-0000-0000-0000-000000000001'; // Maria/Alice
+    const estudantePerfilId = estudante.id;
 
     // Calculamos o intervalo das duas últimas quinzenas
     const agora = new Date();
@@ -150,6 +154,8 @@ export async function obterAcompanhamentoQuinzenal(): Promise<QuinzenaResumo[]> 
 
 // 2. Salvar Revisão Trimestral
 export async function registrarRevisaoTrimestral(dados: RevisaoTrimestralInput): Promise<{ sucesso: boolean; mensagem: string }> {
+  await requireRole('responsavel');
+
   try {
     // Calculamos métricas médias para guardar na revisão trimestral
     const quinzenaInfo = await obterAcompanhamentoQuinzenal();
@@ -171,14 +177,16 @@ export async function registrarRevisaoTrimestral(dados: RevisaoTrimestralInput):
     });
 
     return { sucesso: true, mensagem: 'Revisão trimestral fechada e registrada com sucesso.' };
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao registrar revisão trimestral:', error);
-    return { sucesso: false, mensagem: error.message || 'Erro ao registrar revisão trimestral.' };
+    return { sucesso: false, mensagem: 'Erro ao registrar revisão trimestral.' };
   }
 }
 
 // 3. Listar Revisões Trimestrais registradas
 export async function obterRevisoesTrimestrais() {
+  await requireRole('responsavel');
+
   try {
     return await db.select().from(revisoesTrimestrais).orderBy(desc(revisoesTrimestrais.fechadaEm));
   } catch (error) {

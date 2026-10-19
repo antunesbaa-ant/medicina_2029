@@ -14,10 +14,29 @@ import {
 } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { gerarArtefatosGeminiComFallback } from '../../lib/gemini';
+import { requireManagedStudentProfile, requireRole } from '../../lib/authorization';
 
 // 1. Enfileirar Geração de Artefatos a partir do Arquivo
 export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{ sucesso: boolean; mensagem: string }> {
+  const responsavel = await requireRole('responsavel');
+
   try {
+    const [arquivo] = await db
+      .select({ id: acervoArquivos.id })
+      .from(acervoArquivos)
+      .where(and(
+        eq(acervoArquivos.id, arquivoId),
+        eq(acervoArquivos.enviadoPor, responsavel.id)
+      ))
+      .limit(1);
+
+    if (!arquivo) {
+      return {
+        sucesso: false,
+        mensagem: 'Arquivo não encontrado.'
+      };
+    }
+
     // 1. Busca os chunks do arquivo que possuem tópicos associados
     const chunks = await db
       .select({
@@ -135,17 +154,19 @@ export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{
       sucesso: true,
       mensagem: 'Artefatos gerados e enviados para a fila de curadoria do responsável.'
     };
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao gerar artefatos:', error);
     return {
       sucesso: false,
-      mensagem: error.message || 'Erro interno ao enfileirar geração de artefatos.'
+      mensagem: 'Erro interno ao enfileirar geração de artefatos.'
     };
   }
 }
 
 // 2. Obter Fila de Curadoria Pendente com Joins
 export async function obterFilaCuradoria() {
+  await requireRole('responsavel');
+
   const itens = await db
     .select({
       curadoriaId: curadoriaFila.id,
@@ -209,6 +230,8 @@ export async function curarItem(
   novosDados?: any,
   motivoRejeicao?: string
 ): Promise<{ sucesso: boolean; mensagem: string }> {
+  const responsavel = await requireRole('responsavel');
+
   try {
     const [item] = await db
       .select()
@@ -221,6 +244,9 @@ export async function curarItem(
     }
 
     const editado = decisao === 'editado_e_aprovado';
+    const estudante = item.artefatoTipo === 'flashcard' && decisao !== 'rejeitado'
+      ? await requireManagedStudentProfile()
+      : null;
 
     // 1. Atualiza o artefato de origem
     if (item.artefatoTipo === 'resumo') {
@@ -229,7 +255,9 @@ export async function curarItem(
         .set({
           status: decisao === 'rejeitado' ? 'rejeitado' : 'aprovado',
           titulo: editado && novosDados?.titulo ? novosDados.titulo : undefined,
-          corpo: editado && novosDados?.corpo ? novosDados.corpo : undefined
+          corpo: editado && novosDados?.corpo ? novosDados.corpo : undefined,
+          aprovadoPor: decisao === 'rejeitado' ? null : responsavel.id,
+          aprovadoEm: decisao === 'rejeitado' ? null : new Date()
         })
         .where(eq(materiais.id, item.artefatoId));
     } else if (item.artefatoTipo === 'flashcard') {
@@ -250,12 +278,9 @@ export async function curarItem(
           .where(eq(perguntasAtivas.id, item.artefatoId))
           .limit(1);
 
-        const responsavelPerfilId = '00000000-0000-0000-0000-000000000002'; // Bruno (Responsável)
-        const estudantePerfilId = '00000000-0000-0000-0000-000000000001'; // Maria (Estudante)
-
         // Criar card de repetição FSRS
         await db.insert(cards).values({
-          perfilId: estudantePerfilId,
+          perfilId: estudante!.id,
           topicoId: item.topicoId,
           frente: flashcard.pergunta,
           verso: flashcard.resposta,
@@ -296,8 +321,8 @@ export async function curarItem(
       .where(eq(curadoriaFila.id, curadoriaId));
 
     return { sucesso: true, mensagem: `Item curado com sucesso (${decisao}).` };
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro na curadoria do item:', error);
-    return { sucesso: false, mensagem: error.message || 'Erro ao salvar decisão de curadoria.' };
+    return { sucesso: false, mensagem: 'Erro ao salvar decisão de curadoria.' };
   }
 }

@@ -4,7 +4,7 @@
 
 **Princípio:** menor alteração segura possível; sem refatoração ampla sem necessidade
 
-**Estado:** proposto, ainda não autorizado para implementação
+**Estado:** F1.02 concluída em 19/10/2026; demais tarefas aguardam autorização
 
 ## 1. Estratégia geral
 
@@ -52,6 +52,8 @@ F1.15 Testes de segurança/E2E e operação
 
 ### F1.02 — Guardas de autenticação e autorização nas Server Actions
 
+**Status:** concluída em 19/10/2026.
+
 - **Objetivo:** garantir que toda operação valide sessão e papel na própria action.
 - **Arquivos potencialmente afetados:** novo helper server-only em `src/lib` ou `src/app`; todos os arquivos em `src/app/actions`; pages administrativas.
 - **Dependências:** nenhuma; é a primeira contenção.
@@ -60,8 +62,12 @@ F1.15 Testes de segurança/E2E e operação
 - **Testes necessários:** chamada anônima, estudante e responsável para cada classe de action; tentativa direta sem visitar a página.
 - **Critérios de aceite:** nenhuma action mutável executa sem sessão; operações administrativas negam estudante; `/lacunas` recebe proteção coerente; respostas não revelam detalhes.
 - **Reversão:** reverter apenas o helper e suas chamadas; manter testes de segurança para demonstrar o risco reaberto.
+- **Resultado:** 37/37 Server Actions com guarda server-side; papel revalidado no banco; operações administrativas e pessoais separadas; ownership aplicado aos recursos com proprietário disponível; 71/71 testes e build aprovados.
+- **Riscos residuais:** RLS, restore destrutivo, hashes no backup, tabelas globais e ausência de vínculo responsável–estudante seguem para tarefas específicas.
 
 ### F1.03 — Identidade canônica e ownership
+
+**Status:** parcialmente antecipada pela F1.02; saneamento histórico e decisões de schema permanecem pendentes.
 
 - **Objetivo:** eliminar UUIDs hardcoded e a confusão entre `authUserId` e `perfis.id`.
 - **Arquivos potencialmente afetados:** auth route, `src/db/schema.ts` apenas se necessário, actions de sessão/check-in/redação/simulado/FSRS/dashboard/responsável/curadoria/acervo e componentes que enviam `perfilId`.
@@ -233,6 +239,8 @@ O sistema só deve receber dados reais quando todos os itens abaixo estiverem co
 
 ## 6. Próxima tarefa
 
-**Recomendação: F1.02 — Guardas de autenticação e autorização nas Server Actions.**
+**Recomendação: F1.03 — Consolidação da identidade canônica e do ownership.**
+
+Escopo inicial recomendado: auditar dados históricos somente em cópia isolada; decidir a relação responsável–estudante e o ownership das tabelas globais; preparar migration e rollback sem aplicação em produção; adicionar integração com dois perfis em banco descartável.
 
 Não iniciar automaticamente. Aguardar aprovação explícita.

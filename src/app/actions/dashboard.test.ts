@@ -1,6 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { obterMetricasDashboard } from './dashboard';
 
+vi.mock('../../lib/authorization', () => ({
+  requireAuthenticatedProfile: vi.fn().mockResolvedValue({
+    id: 'perfil-1',
+    authUserId: 'auth-1',
+    nome: 'Estudante Teste',
+    email: null,
+    papel: 'estudante',
+  }),
+  requireRole: vi.fn().mockResolvedValue({
+    id: 'perfil-1',
+    authUserId: 'auth-1',
+    nome: 'Estudante Teste',
+    email: null,
+    papel: 'estudante',
+  }),
+  requireManagedStudentProfile: vi.fn().mockResolvedValue({
+    id: 'perfil-1',
+    authUserId: 'auth-1',
+    nome: 'Estudante Teste',
+    email: null,
+    papel: 'estudante',
+  }),
+  assertOwnership: vi.fn(),
+}));
+
 // Mock DB
 vi.mock('../../db', () => {
   const queryBuilder: any = {

@@ -449,3 +449,40 @@ O plano detalhado e reversível está em `docs/modernizacao/PLANO_MODERNIZACAO.m
 Escopo proposto: criar guards server-side reutilizáveis, derivar o perfil da sessão, aplicar autorização/ownership em todas as Server Actions, bloquear backup/restore para estudante e preparar a matriz de RLS sem ainda ampliar funcionalidades.
 
 Não executar F1.02 sem aprovação explícita.
+
+## 13. Atualização controlada após a F1.02 — 19/10/2026
+
+A tarefa F1.02 implementou a contenção de autenticação, papel e ownership no nível da aplicação. Esta seção preserva o diagnóstico histórico da F1.01 e registra somente a mudança de estado dos riscos.
+
+### Riscos mitigados ou contidos
+
+- As 37 Server Actions agora exigem autenticação ou papel explicitamente no servidor.
+- O papel é reconsultado em `perfis`; a claim JWT não é a autoridade final.
+- `perfis.id` passou a ser a identidade canônica de runtime para as FKs.
+- IDs de perfil foram removidos dos inputs de upload e início de sessão.
+- Sessão, card, erro e acervo receberam filtros de ownership.
+- Estudante não executa backup, restore, acervo, curadoria, lacunas ou acompanhamento.
+- Responsável não executa ações pessoais de estudo.
+- Login e erros alterados usam mensagens públicas genéricas.
+- Falsos sucessos de sessão e check-in foram removidos.
+
+### Riscos que permanecem abertos
+
+- RLS/policies externas não foram verificadas ou versionadas.
+- Backup ainda contém dados de autenticação e restore continua destrutivo quando autorizado.
+- Não existe relação responsável–estudante no schema; a compatibilidade atual exige exatamente uma estudante.
+- Dados históricos não foram inspecionados; não há conclusão sobre eventual associação anterior por UUID incorreto.
+- Ciclo, repertórios e revisões trimestrais não possuem ownership completo no schema.
+- Busca, validação de payloads, atomicidade, Storage e pipeline mantêm os riscos descritos na F1.01.
+- O lint global continua falhando; E2E continuam placeholders.
+
+### Evidência de validação da F1.02
+
+- TypeScript: passou.
+- Vitest: 12 arquivos e 71/71 testes passaram.
+- Build: passou.
+- Lint dirigido dos módulos novos: passou.
+- Lint global: falhou com 172 ocorrências (126 erros e 46 avisos), dívida preexistente.
+- Nenhuma migration, seed, operação em dados reais, deploy, commit ou push foi executado.
+
+O relatório completo está em `docs/modernizacao/RELATORIO_F1_02.md`.

@@ -16,6 +16,7 @@ import {
 } from '../../db/schema';
 import { eq, and, lte, gte, sql, desc } from 'drizzle-orm';
 import { calcularDivergenciaTrilhos } from '../../lib/studysystem';
+import { requireRole } from '../../lib/authorization';
 
 export interface DashboardMetrics {
   aderencia: {
@@ -65,8 +66,10 @@ export interface DashboardMetrics {
 
 // 1. Obter todas as métricas calculadas
 export async function obterMetricasDashboard(): Promise<DashboardMetrics> {
+  const perfil = await requireRole('estudante');
+
   try {
-    const estudantePerfilId = '00000000-0000-0000-0000-000000000001'; // Maria
+    const estudantePerfilId = perfil.id;
 
     // A. Aderência (últimas 4 semanas)
     const quatroSemanasAtras = new Date();

@@ -148,7 +148,7 @@ export default function CronometroPage() {
       tId = tId || 't-mat-1';
 
       // Inicia sessão no backend/mock
-      const sId = await iniciarSessao('00000000-0000-0000-0000-000000000001', bId, tId);
+      const sId = await iniciarSessao(bId, tId);
       
       setSessaoId(sId);
       setBlocoId(bId);

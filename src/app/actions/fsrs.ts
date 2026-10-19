@@ -5,12 +5,13 @@ import { cards, cardRevisoes, topicos, disciplinas } from '../../db/schema';
 import { eq, and, lte, sql } from 'drizzle-orm';
 import { FSRS, Card as FSRSCard, State, Rating } from 'ts-fsrs';
 import { obterEstadoFSRS, obterRatingFSRS } from '../../lib/studysystem';
+import { requireRole } from '../../lib/authorization';
 
 // 1. Obter Cards Due (Vencidos) do Estudante
 export async function obterCardsParaRevisao() {
-  try {
-    const estudantePerfilId = '00000000-0000-0000-0000-000000000001'; // Maria
+  const perfil = await requireRole('estudante');
 
+  try {
     const list = await db
       .select({
         id: cards.id,
@@ -35,7 +36,7 @@ export async function obterCardsParaRevisao() {
       .innerJoin(disciplinas, eq(topicos.disciplinaId, disciplinas.id))
       .where(
         and(
-          eq(cards.perfilId, estudantePerfilId),
+          eq(cards.perfilId, perfil.id),
           eq(cards.status, 'aprovado'),
           eq(cards.suspenso, false),
           lte(cards.due, new Date())
@@ -56,16 +57,18 @@ export async function registrarRevisaoCard(
   ratingStr: 'again' | 'hard' | 'good' | 'easy',
   duracaoMs: number
 ): Promise<{ sucesso: boolean; mensagem: string }> {
+  const perfil = await requireRole('estudante');
+
   try {
     // A. Busca o card do banco
     const [cardDb] = await db
       .select()
       .from(cards)
-      .where(eq(cards.id, cardId))
+      .where(and(eq(cards.id, cardId), eq(cards.perfilId, perfil.id)))
       .limit(1);
 
     if (!cardDb) {
-      return { sucesso: false, mensagem: 'Card não encontrado.' };
+      return { sucesso: false, mensagem: 'Registro não encontrado ou acesso não permitido.' };
     }
 
     // B. Mapeia para tipo FSRSCard
@@ -114,7 +117,7 @@ export async function registrarRevisaoCard(
         due: result.card.due,
         lastReview: now
       })
-      .where(eq(cards.id, cardId));
+      .where(and(eq(cards.id, cardId), eq(cards.perfilId, perfil.id)));
 
     // E. Registra o Log da Revisão
     await db.insert(cardRevisoes).values({
@@ -130,8 +133,8 @@ export async function registrarRevisaoCard(
       sucesso: true,
       mensagem: `Card revisado com sucesso. Próxima revisão agendada para: ${result.card.due.toLocaleDateString('pt-BR')}`
     };
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro ao salvar revisão de card:', error);
-    return { sucesso: false, mensagem: error.message || 'Erro ao registrar revisão.' };
+    return { sucesso: false, mensagem: 'Erro ao registrar revisão.' };
   }
 }

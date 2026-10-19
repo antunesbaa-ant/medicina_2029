@@ -2,6 +2,7 @@
 
 import { db } from '../../db';
 import { checkins } from '../../db/schema';
+import { requireRole } from '../../lib/authorization';
 
 export interface DadosCheckin {
   horasSono: number;
@@ -12,11 +13,13 @@ export interface DadosCheckin {
 }
 
 export async function registrarCheckin(dados: DadosCheckin) {
+  const perfil = await requireRole('estudante');
+
   try {
     const [novoCheckin] = await db
       .insert(checkins)
       .values({
-        perfilId: '00000000-0000-0000-0000-000000000001', // ID do estudante do seed
+        perfilId: perfil.id,
         data: new Date(),
         horasSono: dados.horasSono,
         exercicioMin: dados.exercicioMin,
@@ -28,20 +31,7 @@ export async function registrarCheckin(dados: DadosCheckin) {
 
     return { sucesso: true, checkin: novoCheckin };
   } catch (error) {
-    console.warn('Banco offline ao registrar check-in. Salvando mock local.');
-    return {
-      sucesso: true,
-      mock: true,
-      checkin: {
-        id: `checkin-mock-${Date.now()}`,
-        perfilId: '00000000-0000-0000-0000-000000000001',
-        data: new Date(),
-        horasSono: dados.horasSono,
-        exercicioMin: dados.exercicioMin,
-        humor: dados.humor,
-        energia: dados.energia,
-        notaLivre: dados.notaLivre || null,
-      }
-    };
+    console.error('Erro ao registrar check-in:', error);
+    return { sucesso: false, mensagem: 'Erro ao registrar check-in.' };
   }
 }
