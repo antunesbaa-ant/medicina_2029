@@ -3,16 +3,22 @@
 import { db } from '../../db';
 import { acervoArquivos, acervoPaginas, acervoChunks, disciplinas } from '../../db/schema';
 import { and, eq } from 'drizzle-orm';
-import { extrairTextoPDF, segmentarTexto, classificarTópicoChunk, gerarMockEmbedding } from '../../lib/ingestion';
+import { extrairTextoPDF, segmentarTexto, classificarTópicoChunk } from '../../lib/ingestion';
 import crypto from 'crypto';
 import { uploadToSupabaseStorage } from '../../lib/supabaseStorage';
 import { requireAuthenticatedProfile, requireRole } from '../../lib/authorization';
+import {
+  logOperationalFailure,
+  operationFailure,
+  operationSuccess,
+  type OperationResult,
+} from '../../lib/operation-result';
 
-export interface UploadResultado {
-  sucesso: boolean;
+export interface UploadConfirmado {
+  arquivoId: string;
+  uploadStatus: 'concluido';
+  processamentoStatus: 'aguardando';
   mensagem: string;
-  arquivoId?: string;
-  duplicado?: boolean;
 }
 
 // 1. Enviar e Processar Arquivo (Pipeline completo)
@@ -24,11 +30,14 @@ export async function enviarArquivo(
   vestibular: string,
   nomeArquivo: string,
   base64Data: string // Recebe em base64 para facilitar trânsito
-): Promise<UploadResultado> {
+): Promise<OperationResult<UploadConfirmado>> {
   const perfil = await requireRole('responsavel');
 
   try {
     const fileBuffer = Buffer.from(base64Data, 'base64');
+    if (fileBuffer.length === 0) {
+      return operationFailure('VALIDATION_ERROR', 'O arquivo enviado está vazio ou inválido.');
+    }
     const hash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
 
     // Verificar se já existe um arquivo com esse hash (Deduplicação)
@@ -39,59 +48,69 @@ export async function enviarArquivo(
       .limit(1);
 
     if (arquivosExistentes.length > 0) {
-      return {
-        sucesso: false,
-        mensagem: 'Este arquivo já foi enviado anteriormente (duplicado).',
-        arquivoId: arquivosExistentes[0].id,
-        duplicado: true
-      };
+      return operationFailure('CONFLICT', 'Este arquivo já foi enviado anteriormente.');
     }
 
-    // Inserir registro com status inicial 'aguardando'
     const filePath = `acervo/${hash}_${nomeArquivo}`;
-    
-    // Upload do PDF para o Supabase Storage (se credenciais estiverem configuradas)
-    if (process.env.SUPABASE_ANON_KEY) {
-      try {
-        await uploadToSupabaseStorage(filePath, fileBuffer, 'application/pdf');
-      } catch (err) {
-        console.error('Falha ao gravar arquivo no Supabase Storage, continuando pipeline local:', err);
-      }
+
+    try {
+      await uploadToSupabaseStorage(filePath, fileBuffer, 'application/pdf');
+    } catch {
+      logOperationalFailure('acervo.upload.storage', 'external_service');
+      return operationFailure(
+        'EXTERNAL_SERVICE_ERROR',
+        'Não foi possível armazenar o arquivo. Nenhum processamento foi iniciado.'
+      );
     }
 
-    const [novoArquivo] = await db
-      .insert(acervoArquivos)
-      .values({
-        disciplinaId,
-        titulo,
-        tipoMaterial,
-        serieAlvo,
-        vestibular,
-        filePath,
-        mime: 'application/pdf',
-        tamanhoBytes: fileBuffer.length,
-        enviadoPor: perfil.id,
-        statusProcessamento: 'aguardando',
-        hashConteudo: hash
-      })
-      .returning();
+    let novoArquivo: { id: string } | undefined;
+    try {
+      [novoArquivo] = await db
+        .insert(acervoArquivos)
+        .values({
+          disciplinaId,
+          titulo,
+          tipoMaterial,
+          serieAlvo,
+          vestibular,
+          filePath,
+          mime: 'application/pdf',
+          tamanhoBytes: fileBuffer.length,
+          enviadoPor: perfil.id,
+          statusProcessamento: 'aguardando',
+          hashConteudo: hash
+        })
+        .returning({ id: acervoArquivos.id });
+    } catch {
+      logOperationalFailure('acervo.upload.metadata', 'persistence');
+      return operationFailure(
+        'PERSISTENCE_ERROR',
+        'O arquivo foi armazenado, mas o cadastro não foi concluído. Não reenvie antes de verificar o acervo.'
+      );
+    }
 
-    // Processamento em Background (simulado em Promise para não travar a requisição)
-    processarArquivoPipeline(novoArquivo.id, fileBuffer).catch(err => {
-      console.error(`Erro no pipeline do arquivo ${novoArquivo.id}:`, err);
+    if (!novoArquivo) {
+      logOperationalFailure('acervo.upload.metadata_missing', 'persistence');
+      return operationFailure(
+        'PERSISTENCE_ERROR',
+        'O arquivo foi armazenado, mas o cadastro não foi confirmado. Não reenvie antes de verificar o acervo.'
+      );
+    }
+
+    // Execução efêmera preservada até a F1.11; o retorno confirma somente upload e metadados.
+    void processarArquivoPipeline(novoArquivo.id, fileBuffer).catch(() => {
+      logOperationalFailure('acervo.pipeline.unhandled', 'internal');
     });
 
-    return {
-      sucesso: true,
-      mensagem: 'Arquivo enviado com sucesso. Processamento iniciado na fila.',
-      arquivoId: novoArquivo.id
-    };
-  } catch (error) {
-    console.error('Erro no upload de arquivo:', error);
-    return {
-      sucesso: false,
-      mensagem: 'Erro interno ao fazer upload do arquivo.'
-    };
+    return operationSuccess({
+      arquivoId: novoArquivo.id,
+      uploadStatus: 'concluido',
+      processamentoStatus: 'aguardando',
+      mensagem: 'Upload confirmado. O processamento está pendente e pode ser acompanhado no acervo.',
+    });
+  } catch {
+    logOperationalFailure('acervo.upload', 'persistence');
+    return operationFailure('PERSISTENCE_ERROR', 'Não foi possível concluir o envio do arquivo.');
   }
 }
 
@@ -99,10 +118,12 @@ export async function enviarArquivo(
 async function processarArquivoPipeline(arquivoId: string, fileBuffer: Buffer) {
   try {
     // Passo 1: Extraindo
-    await db
+    const [extraindo] = await db
       .update(acervoArquivos)
       .set({ statusProcessamento: 'extraindo' })
-      .where(eq(acervoArquivos.id, arquivoId));
+      .where(eq(acervoArquivos.id, arquivoId))
+      .returning({ id: acervoArquivos.id });
+    if (!extraindo) throw new Error('status_update_not_confirmed');
 
     const paginas = await extrairTextoPDF(fileBuffer);
 
@@ -118,13 +139,15 @@ async function processarArquivoPipeline(arquivoId: string, fileBuffer: Buffer) {
     }
 
     // Passo 2: Segmentando
-    await db
+    const [segmentando] = await db
       .update(acervoArquivos)
       .set({ 
         statusProcessamento: 'segmentando',
         paginas: paginas.length 
       })
-      .where(eq(acervoArquivos.id, arquivoId));
+      .where(eq(acervoArquivos.id, arquivoId))
+      .returning({ id: acervoArquivos.id });
+    if (!segmentando) throw new Error('status_update_not_confirmed');
 
     const chunks = segmentarTexto(paginas);
 
@@ -136,17 +159,18 @@ async function processarArquivoPipeline(arquivoId: string, fileBuffer: Buffer) {
       .where(eq(acervoArquivos.id, arquivoId))
       .limit(1);
 
-    await db
+    if (!arquivo) throw new Error('source_file_not_found');
+
+    const [classificando] = await db
       .update(acervoArquivos)
       .set({ statusProcessamento: 'classificando' })
-      .where(eq(acervoArquivos.id, arquivoId));
+      .where(eq(acervoArquivos.id, arquivoId))
+      .returning({ id: acervoArquivos.id });
+    if (!classificando) throw new Error('status_update_not_confirmed');
 
     for (const chunk of chunks) {
       // Classificação
-      const { topicoId, confianca } = await classificarTópicoChunk(chunk.texto, arquivo?.disciplinaId || 'default-id');
-
-      // Embedding
-      const embedding = gerarMockEmbedding(chunk.texto);
+      const { topicoId, confianca } = await classificarTópicoChunk(chunk.texto, arquivo.disciplinaId);
 
       await db.insert(acervoChunks).values({
         arquivoId,
@@ -157,26 +181,35 @@ async function processarArquivoPipeline(arquivoId: string, fileBuffer: Buffer) {
         tipoConteudo: chunk.tipoConteudo,
         topicoId,
         confiancaClassificacao: confianca,
-        embedding,
+        // Embeddings fictícios não são persistidos como índices reais.
+        embedding: null,
         tokens: chunk.tokens
       });
     }
 
-    // Concluído
-    await db
+    const [indexando] = await db
       .update(acervoArquivos)
-      .set({ statusProcessamento: 'concluido' })
-      .where(eq(acervoArquivos.id, arquivoId));
+      .set({ statusProcessamento: 'indexando' })
+      .where(eq(acervoArquivos.id, arquivoId))
+      .returning({ id: acervoArquivos.id });
+    if (!indexando) throw new Error('status_update_not_confirmed');
 
-  } catch (error) {
-    console.error(`Erro no pipeline para o arquivo ${arquivoId}:`, error);
-    await db
-      .update(acervoArquivos)
-      .set({ 
-        statusProcessamento: 'falhou',
-        erroProcessamento: 'Falha no processamento do arquivo.'
-      })
-      .where(eq(acervoArquivos.id, arquivoId));
+    // Não existe provedor real de embeddings neste estágio. Concluir seria falso sucesso.
+    throw new Error('embedding_provider_not_configured');
+
+  } catch {
+    logOperationalFailure('acervo.pipeline', 'persistence');
+    try {
+      await db
+        .update(acervoArquivos)
+        .set({
+          statusProcessamento: 'falhou',
+          erroProcessamento: 'O processamento não foi concluído. Tente novamente quando o serviço estiver disponível.'
+        })
+        .where(eq(acervoArquivos.id, arquivoId));
+    } catch {
+      logOperationalFailure('acervo.pipeline.failure_status', 'persistence');
+    }
   }
 }
 

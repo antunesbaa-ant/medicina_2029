@@ -8,6 +8,7 @@ export default function CadernoErrosPage() {
   const [errosList, setErrosList] = useState<any[]>([]);
   const [disciplinas, setDisciplinas] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [mensagemErro, setMensagemErro] = useState<string>('');
 
   // Filters State
   const [selectedDisciplina, setSelectedDisciplina] = useState<string>('');
@@ -26,6 +27,7 @@ export default function CadernoErrosPage() {
 
   const fetchErros = async () => {
     setLoading(true);
+    setMensagemErro('');
     try {
       const res = await obterCadernoErros({
         disciplinaId: selectedDisciplina || undefined,
@@ -33,8 +35,8 @@ export default function CadernoErrosPage() {
         resolvido: selectedStatus === 'resolvido' ? true : selectedStatus === 'pendente' ? false : undefined
       });
       setErrosList(res);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setMensagemErro('Não foi possível carregar o caderno de erros. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -70,12 +72,14 @@ export default function CadernoErrosPage() {
   const handleResolver = async (id: string) => {
     try {
       const res = await resolverErro(id);
-      if (res.sucesso) {
+      if (res.ok) {
         setErrosList(prev => prev.map(e => e.id === id ? { ...e, resolvidoEm: new Date() } : e));
         fetchErros();
+      } else {
+        setMensagemErro(res.message);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setMensagemErro('Não foi possível atualizar o registro. Tente novamente.');
     }
   };
 
@@ -96,14 +100,16 @@ export default function CadernoErrosPage() {
         conceitoCorreto: conceito
       });
 
-      if (res.sucesso) {
+      if (res.ok) {
         setDescricao('');
         setConceito('');
         setExibirForm(false);
         fetchErros();
+      } else {
+        setMensagemErro(res.message);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setMensagemErro('Não foi possível registrar o erro. Tente novamente.');
     } finally {
       setSalvando(false);
     }
@@ -122,6 +128,11 @@ export default function CadernoErrosPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 pb-24 font-['Poppins'] text-[#1B2A33]">
+      {mensagemErro && (
+        <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {mensagemErro}
+        </p>
+      )}
       <header className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-6 gap-4">
         <div>
           <h1 className="text-3xl font-bold font-['Lora'] text-[#0E3D4D]">Caderno de Erros</h1>

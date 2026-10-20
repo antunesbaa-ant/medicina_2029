@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   segmentarTexto,
   gerarMockEmbedding,
-  extrairTextoPDF
+  extrairTextoPDF,
+  buscaHibridaAcervo,
 } from './ingestion';
 
 // Mock pdf-parse
@@ -27,6 +28,12 @@ describe('Motor de Ingestão - Ingestion Pipeline', () => {
       expect(paginas[0].texto).toContain('Página 1');
       expect(paginas[1].numero).toBe(2);
       expect(paginas[1].texto).toContain('Página 2');
+      expect(paginas.every(pagina => pagina.metodo === 'nativo')).toBe(true);
+    });
+
+    it('não rotula texto curto como OCR quando nenhum OCR foi executado', async () => {
+      const paginas = await extrairTextoPDF(Buffer.from('PDF_DUMMY_DATA'));
+      expect(paginas[0].metodo).toBe('nativo');
     });
   });
 
@@ -68,6 +75,12 @@ describe('Motor de Ingestão - Ingestion Pipeline', () => {
       // Magnitude de um vetor normalizado deve ser aproximadamente 1
       const magnitude = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
       expect(magnitude).toBeCloseTo(1, 5);
+    });
+
+    it('não usa embedding determinístico como busca semântica de runtime', async () => {
+      await expect(buscaHibridaAcervo('cardiologia')).rejects.toMatchObject({
+        name: 'EmbeddingServiceUnavailableError',
+      });
     });
   });
 

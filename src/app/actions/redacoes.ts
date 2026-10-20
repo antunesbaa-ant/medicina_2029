@@ -4,6 +4,13 @@ import { db } from '../../db';
 import { redacoes, generos, repertorios } from '../../db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { requireRole } from '../../lib/authorization';
+import {
+  PublicOperationError,
+  logOperationalFailure,
+  operationFailure,
+  operationSuccess,
+  type OperationResult,
+} from '../../lib/operation-result';
 
 export interface RegistrarRedacaoInput {
   formato: 'enem' | 'genero_uece';
@@ -25,38 +32,10 @@ export async function obterGenerosUECE() {
   await requireRole('estudante');
 
   try {
-    const list = await db.select().from(generos);
-    
-    // Se a base estiver vazia, retorna mocks com fichas completas exigidas
-    if (list.length === 0) {
-      return [
-        {
-          id: 'mock-genero-1',
-          nome: 'Carta de Solicitação',
-          finalidade: 'Solicitar uma providência ou solução para um problema social.',
-          interlocutor: 'Uma autoridade pública competente.',
-          estrutura: 'Cabeçalho (local e data), vocativo formal, corpo da carta (solicitação + justificativa), fechamento e assinatura (geralmente pseudônimo).',
-          marcasLinguagem: 'Padrão formal, clareza, verbos no imperativo ou subjuntivo, tom respeitoso porém firme.',
-          erroQueDescaracteriza: 'Identificação real do candidato, ausência de fórmula de tratamento inicial, ou falta de solicitação explícita.',
-          fichaCompleta: true
-        },
-        {
-          id: 'mock-genero-2',
-          nome: 'Crônica Narrativa',
-          finalidade: 'Refletir liricamente ou com ironia sobre um fato do cotidiano.',
-          interlocutor: 'Leitor comum de jornais ou revistas.',
-          estrutura: 'Narrativa curta com poucos personagens, tempo cronológico restrito, foco em um único incidente/cena do dia a dia.',
-          marcasLinguagem: 'Linguagem coloquial bem estruturada, tom intimista, uso de metáforas, subjetividade.',
-          erroQueDescaracteriza: 'Dissertar abstratamente sem contar a crônica ou criar narrativa longa e complexa.',
-          fichaCompleta: true
-        }
-      ];
-    }
-
-    return list;
-  } catch (error) {
-    console.error('Erro ao buscar gêneros:', error);
-    return [];
+    return await db.select().from(generos);
+  } catch {
+    logOperationalFailure('redacoes.generos.list', 'persistence');
+    throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível carregar os gêneros de redação.');
   }
 }
 
@@ -71,31 +50,10 @@ export async function obterRepertorios() {
       .where(eq(repertorios.perfilId, perfil.id))
       .orderBy(desc(repertorios.criadoEm));
 
-    if (list.length === 0) {
-      return [
-        {
-          id: 'mock-rep-1',
-          referencia: 'Zygmunt Bauman — Modernidade Líquida',
-          resumo2Linhas: 'As relações sociais e instituições humanas tornaram-se frágeis e fluidas, imperando o individualismo e o consumo sobre os vínculos comunitários estáveis.',
-          temasAplicaveis: ['Tecnologia', 'Consumo', 'Relações Sociais', 'Saúde Mental'],
-          categoria: 'Sociologia',
-          criadoEm: new Date()
-        },
-        {
-          id: 'mock-rep-2',
-          referencia: 'Constituição Federal de 1988 — Artigo 196',
-          resumo2Linhas: 'A saúde é direito de todos e dever do Estado, garantido mediante políticas sociais e econômicas que visem à redução do risco de doença e ao acesso universal.',
-          temasAplicaveis: ['Saúde Pública', 'Direitos Sociais', 'Acesso à Saúde'],
-          categoria: 'Legislação',
-          criadoEm: new Date()
-        }
-      ];
-    }
-
     return list;
-  } catch (error) {
-    console.error('Erro ao buscar repertórios:', error);
-    return [];
+  } catch {
+    logOperationalFailure('redacoes.repertorios.list', 'persistence');
+    throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível carregar os repertórios.');
   }
 }
 
@@ -121,14 +79,16 @@ export async function obterRedacoes() {
       .orderBy(desc(redacoes.escritaEm));
 
     return list;
-  } catch (error) {
-    console.error('Erro ao buscar redações:', error);
-    return [];
+  } catch {
+    logOperationalFailure('redacoes.list', 'persistence');
+    throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível carregar as redações.');
   }
 }
 
 // 4. Registrar nova Redação
-export async function registrarRedacao(dados: RegistrarRedacaoInput): Promise<{ sucesso: boolean; mensagem: string; redacaoId?: string }> {
+export async function registrarRedacao(
+  dados: RegistrarRedacaoInput
+): Promise<OperationResult<{ redacaoId: string }>> {
   const perfil = await requireRole('estudante');
 
   try {
@@ -142,37 +102,48 @@ export async function registrarRedacao(dados: RegistrarRedacaoInput): Promise<{ 
         texto: dados.texto,
         minutosGastos: dados.minutosGastos,
         escritaEm: new Date(),
-        notaTotal: 920 // Simulação de nota preliminar para demonstração
+        notaTotal: null,
       })
       .returning();
 
-    return {
-      sucesso: true,
-      mensagem: 'Redação registrada com sucesso no painel de acompanhamento.',
-      redacaoId: nova.id
-    };
-  } catch (error) {
-    console.error('Erro ao registrar redação:', error);
-    return { sucesso: false, mensagem: 'Erro ao salvar redação.' };
+    if (!nova) {
+      logOperationalFailure('redacoes.insert_without_returning', 'persistence');
+      return operationFailure('PERSISTENCE_ERROR', 'Não foi possível confirmar o registro da redação.');
+    }
+
+    return operationSuccess({ redacaoId: nova.id });
+  } catch {
+    logOperationalFailure('redacoes.insert', 'persistence');
+    return operationFailure('PERSISTENCE_ERROR', 'Não foi possível salvar a redação. Tente novamente.');
   }
 }
 
 // 5. Registrar Repertório Sociocultural
-export async function registrarRepertorio(dados: RegistrarRepertorioInput): Promise<{ sucesso: boolean; mensagem: string }> {
+export async function registrarRepertorio(
+  dados: RegistrarRepertorioInput
+): Promise<OperationResult<{ repertorioId: string }>> {
   const perfil = await requireRole('estudante');
 
   try {
-    await db.insert(repertorios).values({
-      perfilId: perfil.id,
-      referencia: dados.referencia,
-      resumo2Linhas: dados.resumo2Linhas,
-      temasAplicaveis: dados.temasAplicaveis,
-      categoria: dados.categoria
-    });
+    const [novo] = await db
+      .insert(repertorios)
+      .values({
+        perfilId: perfil.id,
+        referencia: dados.referencia,
+        resumo2Linhas: dados.resumo2Linhas,
+        temasAplicaveis: dados.temasAplicaveis,
+        categoria: dados.categoria,
+      })
+      .returning({ id: repertorios.id });
 
-    return { sucesso: true, mensagem: 'Repertório sociocultural adicionado à sua base de consulta.' };
-  } catch (error) {
-    console.error('Erro ao registrar repertório:', error);
-    return { sucesso: false, mensagem: 'Erro ao salvar repertório.' };
+    if (!novo) {
+      logOperationalFailure('redacoes.repertorio.insert_without_returning', 'persistence');
+      return operationFailure('PERSISTENCE_ERROR', 'Não foi possível confirmar o repertório.');
+    }
+
+    return operationSuccess({ repertorioId: novo.id });
+  } catch {
+    logOperationalFailure('redacoes.repertorio.insert', 'persistence');
+    return operationFailure('PERSISTENCE_ERROR', 'Não foi possível salvar o repertório. Tente novamente.');
   }
 }

@@ -252,6 +252,14 @@ describe('Server Actions - Fase 1', () => {
       expect(idSessao).toBe('sessao-123');
       expect(insertCallsCount).toBe(1);
     });
+
+    it('não confirma início quando INSERT não retorna sessão', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      await expect(iniciarSessao('bloco-1', 'topico-1')).rejects.toMatchObject({
+        code: 'PERSISTENCE_ERROR',
+      });
+      consoleError.mockRestore();
+    });
   });
 
   describe('atualizarSessao()', () => {
@@ -281,9 +289,38 @@ describe('Server Actions - Fase 1', () => {
       expect(res.segundosPausa).toBe(100);
       expect(updateCallsCount).toBe(1);
     });
+
+    it('diferencia UPDATE sem linha de falha de persistência genérica', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      await expect(atualizarSessao('sessao-inexistente', { etapaAtingida: 'conteudo' })).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      consoleError.mockRestore();
+    });
   });
 
   describe('concluirSessao()', () => {
+    it('não prossegue nem confirma quando UPDATE não retorna sessão', async () => {
+      selectMockedOutputs = [[{
+        sessao: {
+          id: 'sessao-123',
+          perfilId: 'perfil-1',
+          cicloBlocoId: 'bloco-1',
+          topicoId: 'topico-1',
+          segundosEfetivos: 0,
+          segundosPausa: 0,
+        },
+        bloco: { id: 'bloco-1', cicloId: 'ciclo-1', ordem: 1 },
+      }]];
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      await expect(concluirSessao('sessao-123', { etapaAtingida: 'registro' })).rejects.toMatchObject({
+        code: 'PERSISTENCE_ERROR',
+      });
+      expect(insertCallsCount).toBe(0);
+      consoleError.mockRestore();
+    });
+
     it('deve concluir como "false" se a etapa atingida for menor que "registro"', async () => {
       // Massa de dados
       const sessaoMock = { id: 'sessao-123', perfilId: 'perfil-1', cicloBlocoId: 'bloco-1', topicoId: 'topico-1', segundosEfetivos: 0, segundosPausa: 0 };

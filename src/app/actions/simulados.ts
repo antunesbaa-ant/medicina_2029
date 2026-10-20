@@ -1,9 +1,16 @@
 'use server';
 
 import { db } from '../../db';
-import { simulados, simuladoAreas, simuladoAnalise, topicos } from '../../db/schema';
+import { simulados, simuladoAreas, simuladoAnalise } from '../../db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { requireRole } from '../../lib/authorization';
+import {
+  PublicOperationError,
+  logOperationalFailure,
+  operationFailure,
+  operationSuccess,
+  type OperationResult,
+} from '../../lib/operation-result';
 
 export interface SimuladoAreaInput {
   area: string; // Ex: Linguagens, Matemática, Natureza, Humanas
@@ -17,7 +24,7 @@ export interface RegistrarSimuladoInput {
   condicoesReais: boolean;
   duracaoMin: number;
   local: string;
-  composicaoProcedencia: any;
+  composicaoProcedencia: unknown;
   areas: SimuladoAreaInput[];
 }
 
@@ -57,13 +64,15 @@ async function listarSimuladosDoPerfil(perfilId: string) {
     }
 
     return results;
-  } catch (error) {
-    console.error('Erro ao listar simulados:', error);
-    return [];
+  } catch {
+    logOperationalFailure('simulados.list', 'persistence');
+    throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível carregar os simulados.');
   }
 }
 
-export async function registrarSimulado(dados: RegistrarSimuladoInput): Promise<{ sucesso: boolean; mensagem: string; simuladoId?: string }> {
+export async function registrarSimulado(
+  dados: RegistrarSimuladoInput
+): Promise<OperationResult<{ simuladoId: string; analiseStatus: 'pendente' }>> {
   const perfil = await requireRole('estudante');
 
   try {
@@ -71,10 +80,11 @@ export async function registrarSimulado(dados: RegistrarSimuladoInput): Promise<
     const simuladosExistentes = await listarSimuladosDoPerfil(perfil.id);
     const temPendente = simuladosExistentes.some(s => !s.analise || !s.analise.concluida);
     if (temPendente) {
-      return {
-        sucesso: false,
-        mensagem: 'Não é permitido registrar um novo simulado enquanto houver um simulado anterior com análise pendente.'
-      };
+      return operationFailure('CONFLICT', 'Não é permitido registrar um novo simulado enquanto houver uma análise pendente.');
+    }
+
+    if (dados.areas.some((area) => area.total <= 0 || area.acertos < 0 || area.acertos > area.total)) {
+      return operationFailure('VALIDATION_ERROR', 'Os totais e acertos das áreas são inválidos.');
     }
 
     // A. Inserir simulado principal
@@ -91,75 +101,37 @@ export async function registrarSimulado(dados: RegistrarSimuladoInput): Promise<
       })
       .returning();
 
-    // B. Inserir áreas
-    let piorArea = '';
-    let menorPorcentagem = 100;
+    if (!novoSimulado) {
+      logOperationalFailure('simulados.insert_without_returning', 'persistence');
+      return operationFailure('PERSISTENCE_ERROR', 'Não foi possível confirmar o registro do simulado.');
+    }
 
+    // B. Inserir áreas
     for (const area of dados.areas) {
       const pct = (area.acertos / area.total) * 100;
-      if (pct < menorPorcentagem) {
-        menorPorcentagem = pct;
-        piorArea = area.area;
+      const [areaInserida] = await db
+        .insert(simuladoAreas)
+        .values({
+          simuladoId: novoSimulado.id,
+          area: area.area,
+          acertos: area.acertos,
+          total: area.total,
+          notaEstimada: Math.round(pct * 8.5),
+        })
+        .returning({ id: simuladoAreas.id });
+
+      if (!areaInserida) {
+        logOperationalFailure('simulados.area_insert_without_returning', 'persistence');
+        return operationFailure('PERSISTENCE_ERROR', 'O simulado foi iniciado, mas não foi possível confirmar todas as áreas.');
       }
-
-      await db.insert(simuladoAreas).values({
-        simuladoId: novoSimulado.id,
-        area: area.area,
-        acertos: area.acertos,
-        total: area.total,
-        notaEstimada: Math.round(pct * 8.5) // Estimativa simples para nota ENEM/UECE
-      });
     }
 
-    // C. Análise automática de assuntos fracos
-    // Identificar três assuntos fracos vinculados à pior área
-    // Aqui usaremos mocks realistas baseados na área para mapear
-    let tresAssuntosFracos: Array<{ topicoId: string; nome: string; acertosPct: number }> = [];
-
-    if (piorArea.toLowerCase().includes('natureza') || piorArea.toLowerCase().includes('biologia')) {
-      tresAssuntosFracos = [
-        { topicoId: 'mock-assunto-1', nome: 'Citologia e Membrana Plasmática', acertosPct: 33 },
-        { topicoId: 'mock-assunto-2', nome: 'Genética Clássica (Leis de Mendel)', acertosPct: 40 },
-        { topicoId: 'mock-assunto-3', nome: 'Eletrodinâmica e Circuitos', acertosPct: 45 }
-      ];
-    } else if (piorArea.toLowerCase().includes('matemática')) {
-      tresAssuntosFracos = [
-        { topicoId: 'mock-assunto-4', nome: 'Geometria Espacial (Prismas e Cilindros)', acertosPct: 20 },
-        { topicoId: 'mock-assunto-5', nome: 'Funções Exponenciais e Logaritmos', acertosPct: 30 },
-        { topicoId: 'mock-assunto-6', nome: 'Análise Combinatória', acertosPct: 35 }
-      ];
-    } else {
-      tresAssuntosFracos = [
-        { topicoId: 'mock-assunto-7', nome: 'Interpretação Textual e Semântica', acertosPct: 50 },
-        { topicoId: 'mock-assunto-8', nome: 'História do Brasil Colonial', acertosPct: 55 },
-        { topicoId: 'mock-assunto-9', nome: 'Geografia Física e Climatologia', acertosPct: 60 }
-      ];
-    }
-
-    // Gravar a análise
-    await db.insert(simuladoAnalise).values({
-      simuladoId: novoSimulado.id,
-      concluida: true,
-      tresAssuntosFracos: tresAssuntosFracos as any,
-      errosEstrategia:MenorDesempenhoEstrategico(menorPorcentagem),
-      minutosAnalise: 30,
-      realizadaEm: new Date()
-    });
-
-    return {
-      sucesso: true,
-      mensagem: 'Simulado registrado e análise de lacunas concluída com sucesso.',
-      simuladoId: novoSimulado.id
-    };
+    return operationSuccess({ simuladoId: novoSimulado.id, analiseStatus: 'pendente' });
   } catch (error) {
-    console.error('Erro ao registrar simulado:', error);
-    return { sucesso: false, mensagem: 'Erro ao registrar simulado.' };
+    if (error instanceof PublicOperationError) {
+      return operationFailure(error.code, error.message);
+    }
+    logOperationalFailure('simulados.insert', 'persistence');
+    return operationFailure('PERSISTENCE_ERROR', 'Não foi possível registrar o simulado. Tente novamente.');
   }
-}
-
-function MenorDesempenhoEstrategico(pct: number): string {
-  if (pct < 50) {
-    return 'Dificuldade severa de gestão de tempo identificada. Sugere-se não se prender a questões difíceis por mais de 3 minutos.';
-  }
-  return 'Bom desempenho geral. Concentre-se nas revisões ativas dos tópicos mais fracos.';
 }

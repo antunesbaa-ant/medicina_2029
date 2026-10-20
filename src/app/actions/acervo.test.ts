@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { enviarArquivo, listarArquivosAcervo, obterAcervoStatus } from './acervo';
 import { buscarNoAcervo } from './busca';
+import { uploadToSupabaseStorage } from '../../lib/supabaseStorage';
 
 vi.mock('../../lib/authorization', () => ({
   requireAuthenticatedProfile: vi.fn().mockResolvedValue({
@@ -78,8 +79,49 @@ describe('Acervo e Ingestão - Server Actions', () => {
         Buffer.from('dummy').toString('base64')
       );
 
-      expect(result.sucesso).toBe(true);
-      expect(result.arquivoId).toBe('mock-file-id');
+      expect(result).toEqual({
+        ok: true,
+        data: {
+          arquivoId: 'mock-file-id',
+          uploadStatus: 'concluido',
+          processamentoStatus: 'aguardando',
+          mensagem: expect.stringContaining('Upload confirmado'),
+        },
+      });
+    });
+
+    it('não cadastra nem informa sucesso quando o Storage falha', async () => {
+      vi.mocked(uploadToSupabaseStorage).mockRejectedValueOnce(new Error('credencial=segredo'));
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const result = await enviarArquivo(
+        'disc-id-1', 'Livro Teste', 'livro', 1, 'enem', 'teste.pdf',
+        Buffer.from('dummy').toString('base64')
+      );
+
+      expect(result).toEqual({
+        ok: false,
+        code: 'EXTERNAL_SERVICE_ERROR',
+        message: expect.stringContaining('Nenhum processamento foi iniciado'),
+      });
+      if (result.ok) throw new Error('O upload deveria ter falhado.');
+      expect(result.message).not.toContain('segredo');
+      expect(consoleError.mock.calls.flat().join(' ')).not.toContain('segredo');
+    });
+
+    it('não informa sucesso quando o INSERT não retorna o arquivo persistido', async () => {
+      const { db } = await import('../../db');
+      vi.mocked(db.insert).mockReturnValueOnce({
+        values: vi.fn().mockReturnValue({ returning: vi.fn().mockResolvedValue([]) }),
+      } as never);
+
+      const result = await enviarArquivo(
+        'disc-id-1', 'Livro Teste', 'livro', 1, 'enem', 'teste.pdf',
+        Buffer.from('dummy').toString('base64')
+      );
+
+      expect(result).toMatchObject({ ok: false, code: 'PERSISTENCE_ERROR' });
+      expect(result).not.toHaveProperty('data');
     });
   });
 
@@ -101,6 +143,13 @@ describe('Acervo e Ingestão - Server Actions', () => {
     it('deve retornar resultados vazios para queries vazias', async () => {
       const results = await buscarNoAcervo('');
       expect(results.length).toBe(0);
+    });
+
+    it('não apresenta similaridade fictícia quando embeddings reais estão indisponíveis', async () => {
+      await expect(buscarNoAcervo('cardiologia')).rejects.toMatchObject({
+        code: 'EXTERNAL_SERVICE_ERROR',
+        message: 'A busca semântica está temporariamente indisponível.',
+      });
     });
   });
 

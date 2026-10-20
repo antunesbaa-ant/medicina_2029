@@ -8,6 +8,7 @@ export default function RedacoesPage() {
   const [repertoriosList, setRepertoriosList] = useState<any[]>([]);
   const [generosList, setGenerosList] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  const [mensagemErro, setMensagemErro] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'redacoes' | 'repertorios' | 'generos'>('redacoes');
 
   // Redação Form State
@@ -29,6 +30,7 @@ export default function RedacoesPage() {
 
   const loadData = async () => {
     setLoading(true);
+    setMensagemErro('');
     try {
       const red = await obterRedacoes();
       setRedacoesList(red);
@@ -41,8 +43,8 @@ export default function RedacoesPage() {
       if (gen.length > 0) {
         setGeneroId(gen[0].id);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setMensagemErro('Não foi possível carregar os dados de redação. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -66,14 +68,16 @@ export default function RedacoesPage() {
         minutosGastos: minutos
       });
 
-      if (res.sucesso) {
+      if (res.ok) {
         setTema('');
         setTexto('');
         setShowRedacaoForm(false);
         loadData();
+      } else {
+        setMensagemErro(res.message);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setMensagemErro('Não foi possível salvar a redação. Tente novamente.');
     } finally {
       setSalvandoRedacao(false);
     }
@@ -93,15 +97,17 @@ export default function RedacoesPage() {
         categoria
       });
 
-      if (res.sucesso) {
+      if (res.ok) {
         setReferencia('');
         setResumo('');
         setTagsInput('');
         setShowRepertorioForm(false);
         loadData();
+      } else {
+        setMensagemErro(res.message);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setMensagemErro('Não foi possível salvar o repertório. Tente novamente.');
     } finally {
       setSalvandoRepertorio(false);
     }
@@ -109,6 +115,11 @@ export default function RedacoesPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 pb-24 font-['Poppins'] text-[#1B2A33] space-y-8">
+      {mensagemErro && (
+        <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {mensagemErro}
+        </p>
+      )}
       
       {/* Header */}
       <header className="border-b pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">

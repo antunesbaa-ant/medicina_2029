@@ -3,6 +3,12 @@
 import { db } from '../../db';
 import { checkins } from '../../db/schema';
 import { requireRole } from '../../lib/authorization';
+import {
+  logOperationalFailure,
+  operationFailure,
+  operationSuccess,
+  type OperationResult,
+} from '../../lib/operation-result';
 
 export interface DadosCheckin {
   horasSono: number;
@@ -12,7 +18,9 @@ export interface DadosCheckin {
   notaLivre?: string;
 }
 
-export async function registrarCheckin(dados: DadosCheckin) {
+export async function registrarCheckin(
+  dados: DadosCheckin
+): Promise<OperationResult<{ checkin: typeof checkins.$inferSelect }>> {
   const perfil = await requireRole('estudante');
 
   try {
@@ -29,9 +37,14 @@ export async function registrarCheckin(dados: DadosCheckin) {
       })
       .returning();
 
-    return { sucesso: true, checkin: novoCheckin };
-  } catch (error) {
-    console.error('Erro ao registrar check-in:', error);
-    return { sucesso: false, mensagem: 'Erro ao registrar check-in.' };
+    if (!novoCheckin) {
+      logOperationalFailure('checkin.insert_without_returning', 'persistence');
+      return operationFailure('PERSISTENCE_ERROR', 'Não foi possível confirmar o check-in. Tente novamente.');
+    }
+
+    return operationSuccess({ checkin: novoCheckin });
+  } catch {
+    logOperationalFailure('checkin.insert', 'persistence');
+    return operationFailure('PERSISTENCE_ERROR', 'Não foi possível registrar o check-in. Tente novamente.');
   }
 }

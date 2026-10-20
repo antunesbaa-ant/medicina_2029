@@ -31,6 +31,7 @@ export default function HojePage({ dadosIniciais, metricasIniciais }: HojePagePr
   const [energia, setEnergia] = useState<number>(4);
   const [notaLivre, setNotaLivre] = useState<string>('');
   const [salvandoCheckin, setSalvandoCheckin] = useState<boolean>(false);
+  const [erroCheckin, setErroCheckin] = useState<string>('');
   const [dataHoje, setDataHoje] = useState<string>('');
 
   // Carregar dados locais (localStorage) para persistência offline/refresh
@@ -95,6 +96,7 @@ export default function HojePage({ dadosIniciais, metricasIniciais }: HojePagePr
   const handleSaveCheckin = async (e: React.FormEvent) => {
     e.preventDefault();
     setSalvandoCheckin(true);
+    setErroCheckin('');
     
     const dados = {
       horasSono,
@@ -104,14 +106,21 @@ export default function HojePage({ dadosIniciais, metricasIniciais }: HojePagePr
       notaLivre: notaLivre.trim()
     };
 
-    const res = await registrarCheckin(dados);
-    
-    if (res.sucesso) {
-      const hojeStr = new Date().toDateString();
-      localStorage.setItem(`medicina_2029_checkin_${hojeStr}`, JSON.stringify(dados));
-      setCheckinFeito(true);
+    try {
+      const res = await registrarCheckin(dados);
+
+      if (res.ok) {
+        const hojeStr = new Date().toDateString();
+        localStorage.setItem(`medicina_2029_checkin_${hojeStr}`, JSON.stringify(dados));
+        setCheckinFeito(true);
+      } else {
+        setErroCheckin(res.message);
+      }
+    } catch {
+      setErroCheckin('Não foi possível registrar o check-in. Tente novamente.');
+    } finally {
+      setSalvandoCheckin(false);
     }
-    setSalvandoCheckin(false);
   };
 
   // Calcular aderência
@@ -455,6 +464,11 @@ export default function HojePage({ dadosIniciais, metricasIniciais }: HojePagePr
                 >
                   {salvandoCheckin ? 'Gravando...' : 'Salvar Ficha Diária'}
                 </button>
+                {erroCheckin && (
+                  <p role="alert" className="text-xs font-medium text-red-700">
+                    {erroCheckin}
+                  </p>
+                )}
               </form>
             )}
           </section>

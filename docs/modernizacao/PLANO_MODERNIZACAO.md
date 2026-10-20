@@ -4,7 +4,7 @@
 
 **Princípio:** menor alteração segura possível; sem refatoração ampla sem necessidade
 
-**Estado:** F1.02, F1.03 e F1.05 concluídas; F1.03-M reprovou a proposta monolítica; F1.03-R foi aprovada com ressalvas; F1.05 foi **APROVADA** em 19/10/2026, sem acesso ou alteração de produção
+**Estado:** F1.02 a F1.07 executadas; F1.03-M reprovou a proposta monolítica; F1.03-R e F1.07 foram aprovadas com ressalvas; nenhuma etapa desta sequência acessou ou alterou produção
 
 ## 1. Estratégia geral
 
@@ -188,6 +188,8 @@ F1.15 Testes de segurança/E2E e operação
 
 ### F1.07 — Contratos explícitos de erro e remoção de falso sucesso
 
+**Status:** concluída em 20/10/2026 como **APROVADA COM RESSALVAS**. Os falsos sucessos críticos de upload/Storage, geração Gemini, persistência sem `RETURNING`, análise simulada de simulados e avanço local do cronômetro sem confirmação foram contidos. Permanecem fallbacks de runtime e contratos legados em módulos fora do recorte seguro desta intervenção; atomicidade ampla continua reservada à F1.08.
+
 - **Objetivo:** impedir que falhas de persistência sejam apresentadas como sucesso.
 - **Arquivos potencialmente afetados:** `sessao.ts`, `checkin.ts`, `ciclo.ts`, `dashboard.ts`, `redacoes.ts`, `lacunas.ts`, `responsavel.ts`, componentes consumidores.
 - **Dependências:** F1.03.
@@ -196,6 +198,12 @@ F1.15 Testes de segurança/E2E e operação
 - **Testes necessários:** falha de DB, timeout e zero linhas; UI não avança ponteiro nem marca check-in; logs sem segredos.
 - **Critérios de aceite:** nenhuma action retorna sucesso quando não persistiu; dashboard nunca troca erro por dado plausível; usuário recebe ação de retry.
 - **Reversão:** reverter por módulo; não reintroduzir mocks silenciosos, usar estado de manutenção explícito.
+- **Resultado:** criado `OperationResult<T>` como união discriminada com oito códigos públicos estáveis; actions selecionadas passaram a confirmar `INSERT`/`UPDATE`; consultas alteradas diferenciam vazio legítimo de indisponibilidade; logs novos registram somente categoria e contexto constantes; autenticação e autorização permanecem fail-closed.
+- **IA e acervo:** Gemini falha explicitamente por chave ausente, HTTP, timeout, rede ou resposta inválida; o gerador determinístico não é usado no runtime. Upload só é confirmado após Storage e metadados persistidos; processamento é reportado como pendente e, sem embeddings reais, termina visivelmente em falha em vez de conclusão fictícia.
+- **Interfaces:** check-in, cronômetro, busca, caderno de erros, redações, simulados, acervo e curadoria foram adaptados para não avançar nem exibir sucesso sem confirmação.
+- **Validação:** TypeScript, build, Drizzle, `git diff --check`, 24 arquivos/172 testes Vitest e 41/41 cenários RLS em PostgreSQL isolado passaram. O lint do conjunto completo de 32 arquivos TS/TSX alterados encontrou 67 ocorrências preexistentes (53 erros e 14 avisos); o subconjunto novo ou previamente limpo da F1.07 passou. O lint global melhorou de 136 para 126 ocorrências, mas continua vermelho.
+- **Ressalvas:** ciclo, dashboard, lacunas e acompanhamento ainda contêm mocks/fallbacks; FSRS e algumas consultas ainda convertem falha em lista vazia; fluxos de sessão, FSRS, simulado, curadoria e acervo não são integralmente atômicos/idempotentes; a fila do acervo segue efêmera; busca/embeddings reais não existem; E2E de navegador não foi executado.
+- **Próximo gate:** F1.08 para atomicidade, idempotência, concorrência e comunicação explícita de persistência parcial; depois F1.09–F1.12 para validação, Storage, fila e IA/recuperação reais.
 
 ### F1.08 — Atomicidade, idempotência e concorrência
 

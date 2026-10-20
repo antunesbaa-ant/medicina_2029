@@ -15,6 +15,7 @@ export default function CuradoriaPage() {
   const [editData, setEditData] = useState<any>({});
   const [rejeitandoId, setRejeitandoId] = useState<string | null>(null);
   const [motivoRejeicao, setMotivoRejeicao] = useState<string>('');
+  const [acaoMsg, setAcaoMsg] = useState<string>('');
 
   // Generation Trigger state
   const [gerandoArquivoId, setGerandoArquivoId] = useState<string | null>(null);
@@ -41,13 +42,16 @@ export default function CuradoriaPage() {
 
   const handleAprovar = async (curadoriaId: string) => {
     setCurandoId(curadoriaId);
+    setAcaoMsg('');
     try {
       const res = await curarItem(curadoriaId, 'aprovado');
-      if (res.sucesso) {
+      if (res.ok) {
         setFila(prev => prev.filter(item => item.curadoriaId !== curadoriaId));
+      } else {
+        setAcaoMsg(res.message);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setAcaoMsg('Não foi possível salvar a decisão. Tente novamente.');
     } finally {
       setCurandoId(null);
     }
@@ -60,14 +64,17 @@ export default function CuradoriaPage() {
 
   const handleSalvarEdicao = async (curadoriaId: string) => {
     setCurandoId(curadoriaId);
+    setAcaoMsg('');
     try {
       const res = await curarItem(curadoriaId, 'editado_e_aprovado', editData);
-      if (res.sucesso) {
+      if (res.ok) {
         setFila(prev => prev.filter(item => item.curadoriaId !== curadoriaId));
         setEditId(null);
+      } else {
+        setAcaoMsg(res.message);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setAcaoMsg('Não foi possível salvar a edição. Tente novamente.');
     } finally {
       setCurandoId(null);
     }
@@ -76,15 +83,18 @@ export default function CuradoriaPage() {
   const handleRejeitar = async (curadoriaId: string) => {
     if (!motivoRejeicao.trim()) return;
     setCurandoId(curadoriaId);
+    setAcaoMsg('');
     try {
       const res = await curarItem(curadoriaId, 'rejeitado', null, motivoRejeicao.trim());
-      if (res.sucesso) {
+      if (res.ok) {
         setFila(prev => prev.filter(item => item.curadoriaId !== curadoriaId));
         setRejeitandoId(null);
         setMotivoRejeicao('');
+      } else {
+        setAcaoMsg(res.message);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setAcaoMsg('Não foi possível salvar a rejeição. Tente novamente.');
     } finally {
       setCurandoId(null);
     }
@@ -92,17 +102,17 @@ export default function CuradoriaPage() {
 
   const triggerGeracao = async (arquivoId: string) => {
     setGerandoArquivoId(arquivoId);
-    setGeracaoMsg('Gerando artefatos pedagógicos via Claude...');
+    setGeracaoMsg('Gerando artefatos pedagógicos via Gemini...');
     try {
       const res = await enfileirarGeracaoDeArtefatos(arquivoId);
-      if (res.sucesso) {
-        setGeracaoMsg('Sucesso: Artefatos enfileirados para curadoria.');
-        loadData();
+      if (res.ok) {
+        setGeracaoMsg(res.data.mensagem);
+        await loadData();
       } else {
-        setGeracaoMsg(`Erro: ${res.mensagem}`);
+        setGeracaoMsg(`Erro: ${res.message}`);
       }
-    } catch (err: any) {
-      setGeracaoMsg(`Erro: ${err.message}`);
+    } catch {
+      setGeracaoMsg('Erro: Não foi possível concluir a geração. Tente novamente.');
     } finally {
       setGerandoArquivoId(null);
     }
@@ -136,6 +146,12 @@ export default function CuradoriaPage() {
           </div>
         )}
       </header>
+
+      {acaoMsg && (
+        <p role="alert" className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          {acaoMsg}
+        </p>
+      )}
 
       {loading ? (
         <p className="text-sm text-gray-400">Carregando fila de curadoria...</p>

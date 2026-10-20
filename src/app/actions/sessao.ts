@@ -5,6 +5,7 @@ import { sessoes, cicloBlocos, cicloEstado, erros, questoes, tentativas } from '
 import { and, eq } from 'drizzle-orm';
 import { validarConclusaoSessao, calcularProximaOrdem } from '../../lib/studysystem';
 import { requireRole } from '../../lib/authorization';
+import { PublicOperationError, logOperationalFailure } from '../../lib/operation-result';
 
 export async function iniciarSessao(
   cicloBlocoId: string,
@@ -28,13 +29,15 @@ export async function iniciarSessao(
       .returning();
 
     if (!sessaoInserida) {
-      throw new Error('Não foi possível iniciar a sessão');
+      logOperationalFailure('sessao.start_without_returning', 'persistence');
+      throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível confirmar o início da sessão.');
     }
 
     return sessaoInserida.id;
   } catch (error) {
-    console.error('Erro ao iniciar sessão:', error);
-    throw new Error('Não foi possível iniciar a sessão.');
+    if (error instanceof PublicOperationError) throw error;
+    logOperationalFailure('sessao.start', 'persistence');
+    throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível iniciar a sessão.');
   }
 }
 
@@ -64,13 +67,14 @@ export async function atualizarSessao(
       .returning();
 
     if (!sessaoAtualizada) {
-      throw new Error('Sessão não encontrada ou acesso não permitido.');
+      throw new PublicOperationError('NOT_FOUND', 'Sessão não encontrada ou acesso não permitido.');
     }
 
     return sessaoAtualizada;
   } catch (error) {
-    console.error('Erro ao atualizar sessão:', error);
-    throw new Error('Não foi possível atualizar a sessão.');
+    if (error instanceof PublicOperationError) throw error;
+    logOperationalFailure('sessao.update', 'persistence');
+    throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível atualizar a sessão.');
   }
 }
 
@@ -110,7 +114,7 @@ export async function concluirSessao(
       .limit(1);
 
     if (!dadosSessao) {
-      throw new Error('Sessão não encontrada ou acesso não permitido.');
+      throw new PublicOperationError('NOT_FOUND', 'Sessão não encontrada ou acesso não permitido.');
     }
 
     const { sessao, bloco } = dadosSessao;
@@ -140,7 +144,7 @@ export async function concluirSessao(
         .limit(1);
 
       if (!questao || !tentativa) {
-        throw new Error('Registro relacionado não encontrado ou acesso não permitido.');
+        throw new PublicOperationError('NOT_FOUND', 'Registro relacionado não encontrado ou acesso não permitido.');
       }
 
       errosValidados.push({ ...erro, ...questao });
@@ -159,6 +163,11 @@ export async function concluirSessao(
       })
       .where(and(eq(sessoes.id, sessaoId), eq(sessoes.perfilId, perfil.id)))
       .returning();
+
+    if (!sessaoConcluida) {
+      logOperationalFailure('sessao.finish_without_returning', 'persistence');
+      throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível confirmar a conclusão da sessão.');
+    }
 
     // 4. Registra os erros, se houver
     if (errosValidados.length > 0) {
@@ -202,8 +211,9 @@ export async function concluirSessao(
 
     return sessaoConcluida;
   } catch (error) {
-    console.error('Erro ao concluir sessão:', error);
-    throw new Error('Não foi possível concluir a sessão.');
+    if (error instanceof PublicOperationError) throw error;
+    logOperationalFailure('sessao.finish', 'persistence');
+    throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível concluir a sessão.');
   }
 }
 

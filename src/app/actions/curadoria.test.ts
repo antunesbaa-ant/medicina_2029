@@ -4,8 +4,21 @@ import { obterLacunasEstudo } from './lacunas';
 import { obterCadernoErros, resolverErro } from './cadernoErros';
 import { injetarTopicoNoCiclo } from './reestudo';
 import { listarSimulados } from './simulados';
+import { AuthorizationError, requireManagedStudentProfile } from '../../lib/authorization';
+
+const dbState = vi.hoisted(() => ({ selectResults: [] as unknown[][] }));
 
 vi.mock('../../lib/authorization', () => {
+  class AuthorizationError extends Error {
+    readonly code: 'UNAUTHENTICATED' | 'FORBIDDEN';
+
+    constructor(code: 'UNAUTHENTICATED' | 'FORBIDDEN') {
+      super(code === 'UNAUTHENTICATED' ? 'Autenticação necessária.' : 'Acesso não autorizado.');
+      this.name = 'AuthorizationError';
+      this.code = code;
+    }
+  }
+
   const estudante = {
     id: 'perfil-1',
     authUserId: 'auth-1',
@@ -22,6 +35,7 @@ vi.mock('../../lib/authorization', () => {
   };
 
   return {
+    AuthorizationError,
     requireAuthenticatedProfile: vi.fn().mockResolvedValue(estudante),
     requireRole: vi.fn().mockImplementation(async (role: string) => (
       role === 'responsavel' ? responsavel : estudante
@@ -47,7 +61,7 @@ vi.mock('../../db', () => {
     groupBy: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
-    then: (resolve: any) => resolve([])
+    then: (resolve: any) => resolve(dbState.selectResults.shift() ?? [])
   };
   return { db: queryBuilder };
 });
@@ -56,6 +70,7 @@ describe('Fase 3 & 4 - Server Actions Tests', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    dbState.selectResults.length = 0;
   });
 
   describe('obterFilaCuradoria', () => {
@@ -68,7 +83,32 @@ describe('Fase 3 & 4 - Server Actions Tests', () => {
   describe('curarItem', () => {
     it('deve retornar erro para item inexistente', async () => {
       const res = await curarItem('non-existent', 'aprovado');
-      expect(res.sucesso).toBe(false);
+      expect(res).toMatchObject({ ok: false, code: 'NOT_FOUND' });
+    });
+
+    it('preserva a negação de autorização ao resolver a estudante vinculada', async () => {
+      dbState.selectResults.push([{ id: 'fila-1', artefatoTipo: 'flashcard', artefatoId: 'fc-1' }]);
+      vi.mocked(requireManagedStudentProfile).mockRejectedValueOnce(new AuthorizationError('FORBIDDEN'));
+
+      await expect(curarItem('fila-1', 'aprovado')).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    });
+  });
+
+  describe('geração por IA', () => {
+    it('não cria falso sucesso quando a chave Gemini está ausente', async () => {
+      const originalKey = process.env.GEMINI_API_KEY;
+      delete process.env.GEMINI_API_KEY;
+      dbState.selectResults.push(
+        [{ id: 'arquivo-1', statusProcessamento: 'concluido' }],
+        [{ texto: 'Conteúdo médico', topicoId: 'topico-1', topicoNome: 'Fisiologia' }]
+      );
+
+      const result = await enfileirarGeracaoDeArtefatos('arquivo-1');
+
+      expect(result).toMatchObject({ ok: false, code: 'EXTERNAL_SERVICE_ERROR' });
+      expect(result).not.toHaveProperty('data');
+      if (originalKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = originalKey;
     });
   });
 
@@ -88,7 +128,7 @@ describe('Fase 3 & 4 - Server Actions Tests', () => {
 
     it('deve marcar erro como resolvido', async () => {
       const res = await resolverErro('mock-erro-id');
-      expect(res.sucesso).toBe(true);
+      expect(res.ok).toBe(true);
     });
   });
 

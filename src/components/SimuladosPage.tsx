@@ -25,14 +25,16 @@ export default function SimuladosPage() {
   const [salvando, setSalvando] = useState<boolean>(false);
   const [injetandoId, setInjetandoId] = useState<string | null>(null);
   const [reestudoMsg, setReestudoMsg] = useState<string>('');
+  const [mensagemErro, setMensagemErro] = useState<string>('');
 
   const fetchSimulados = async () => {
     setLoading(true);
+    setMensagemErro('');
     try {
       const res = await listarSimulados();
       setSimuladosList(res);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setMensagemErro('Não foi possível carregar os simulados. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -63,12 +65,14 @@ export default function SimuladosPage() {
         areas: areasInput
       });
 
-      if (res.sucesso) {
+      if (res.ok) {
         setExibirForm(false);
         fetchSimulados();
+      } else {
+        setMensagemErro(res.message);
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setMensagemErro('Não foi possível registrar o simulado. Tente novamente.');
     } finally {
       setSalvando(false);
     }
@@ -102,6 +106,11 @@ export default function SimuladosPage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 pb-24 font-['Poppins'] text-[#1B2A33]">
+      {mensagemErro && (
+        <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {mensagemErro}
+        </p>
+      )}
       <header className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-6 gap-4">
         <div>
           <h1 className="text-3xl font-bold font-['Lora'] text-[#0E3D4D]">Desempenho em Simulados</h1>

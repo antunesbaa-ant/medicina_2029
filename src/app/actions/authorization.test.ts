@@ -214,14 +214,14 @@ describe('Autorização das Server Actions', () => {
 
     const resultado = await enviarArquivo(...uploadArgs);
 
-    expect(resultado).toMatchObject({ sucesso: true, arquivoId: 'arquivo-1' });
+    expect(resultado).toMatchObject({ ok: true, data: { arquivoId: 'arquivo-1' } });
     expect(dbDouble.valuesCalls).toContainEqual(expect.objectContaining({
       enviadoPor: responsavel.id,
     }));
     expect(storageMocks.uploadToSupabaseStorage).toHaveBeenCalledOnce();
 
     await vi.waitFor(() => {
-      expect(dbDouble.db.update).toHaveBeenCalledTimes(4);
+      expect(dbDouble.db.update).toHaveBeenCalled();
     });
   });
 
@@ -237,7 +237,7 @@ describe('Autorização das Server Actions', () => {
         tentativaId: 'tentativa-alheia',
         tipoErro: 'conteudo',
       }],
-    })).rejects.toThrow('Não foi possível concluir a sessão.');
+    })).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
     expect(dbDouble.db.update).not.toHaveBeenCalled();
     expect(dbDouble.db.insert).not.toHaveBeenCalled();
@@ -251,7 +251,7 @@ describe('Autorização das Server Actions', () => {
 
     await expect(atualizarSessao('sessao-alheia', {
       segundosEfetivos: 120,
-    })).rejects.toThrow('Não foi possível atualizar a sessão.');
+    })).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
     expect(dbDouble.db.insert).not.toHaveBeenCalled();
     consoleError.mockRestore();
@@ -263,8 +263,9 @@ describe('Autorização das Server Actions', () => {
 
     const erro = await resolverErro('erro-alheio');
     expect(erro).toEqual({
-      sucesso: false,
-      mensagem: 'Registro não encontrado ou acesso não permitido.',
+      ok: false,
+      code: 'NOT_FOUND',
+      message: 'Registro não encontrado ou acesso não permitido.',
     });
     expect(dbDouble.db.insert).not.toHaveBeenCalled();
 

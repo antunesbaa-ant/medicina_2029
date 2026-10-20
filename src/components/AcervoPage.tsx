@@ -129,20 +129,24 @@ export default function AcervoPage() {
           base64Data
         );
 
-        if (res.sucesso) {
-          setUploadMessage('Sucesso: Arquivo enfileirado para processamento.');
+        if (res.ok) {
+          setUploadMessage(res.data.mensagem);
           setFile(null);
           setTitulo('');
           const files = await listarArquivosAcervo();
           setArquivos(files);
         } else {
-          setUploadMessage(`Erro: ${res.mensagem}`);
+          setUploadMessage(`Erro: ${res.message}`);
         }
         setUploading(false);
       };
+      reader.onerror = () => {
+        setUploadMessage('Erro: Não foi possível ler o arquivo selecionado.');
+        setUploading(false);
+      };
       reader.readAsDataURL(file);
-    } catch (err: any) {
-      setUploadMessage(`Erro: ${err.message || 'Falha no processamento.'}`);
+    } catch {
+      setUploadMessage('Erro: Não foi possível concluir o envio. Tente novamente.');
       setUploading(false);
     }
   };
@@ -313,7 +317,7 @@ export default function AcervoPage() {
 
             {uploadMessage && (
               <p className={`text-xs mt-2 font-medium text-center ${
-                uploadMessage.startsWith('Sucesso') ? 'text-emerald-600' : 'text-rose-500'
+                uploadMessage.startsWith('Upload confirmado') ? 'text-emerald-600' : 'text-rose-500'
               }`}>
                 {uploadMessage}
               </p>

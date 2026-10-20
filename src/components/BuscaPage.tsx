@@ -11,6 +11,7 @@ export default function BuscaPage() {
   const [resultados, setResultados] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [hasSearched, setHasSearched] = useState<boolean>(false);
+  const [mensagemErro, setMensagemErro] = useState<string>('');
 
   // Load disciplines
   useEffect(() => {
@@ -38,11 +39,13 @@ export default function BuscaPage() {
 
     setLoading(true);
     setHasSearched(true);
+    setMensagemErro('');
     try {
       const res = await buscarNoAcervo(query, selectedDisciplina || undefined);
       setResultados(res);
-    } catch (err) {
-      console.error(err);
+    } catch {
+      setResultados([]);
+      setMensagemErro('Não foi possível realizar a busca. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -93,6 +96,11 @@ export default function BuscaPage() {
       </form>
 
       {/* Results Section */}
+      {mensagemErro && (
+        <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {mensagemErro}
+        </p>
+      )}
       <div className="space-y-4">
         {loading ? (
           <div className="text-center py-12">

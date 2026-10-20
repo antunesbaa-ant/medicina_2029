@@ -13,16 +13,35 @@ import {
   cards
 } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
-import { gerarArtefatosGeminiComFallback } from '../../lib/gemini';
-import { requireManagedStudentProfile, requireRole } from '../../lib/authorization';
+import { GeminiGenerationError, gerarArtefatosGemini } from '../../lib/gemini';
+import {
+  AuthorizationError,
+  requireManagedStudentProfile,
+  requireRole,
+} from '../../lib/authorization';
+import {
+  logOperationalFailure,
+  operationFailure,
+  operationSuccess,
+  type OperationResult,
+} from '../../lib/operation-result';
+
+interface GeracaoConfirmada {
+  itensGerados: number;
+  status: 'pendente_curadoria';
+  mensagem: string;
+}
 
 // 1. Enfileirar Geração de Artefatos a partir do Arquivo
-export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{ sucesso: boolean; mensagem: string }> {
+export async function enfileirarGeracaoDeArtefatos(
+  arquivoId: string
+): Promise<OperationResult<GeracaoConfirmada>> {
   const responsavel = await requireRole('responsavel');
+  let itensGerados = 0;
 
   try {
     const [arquivo] = await db
-      .select({ id: acervoArquivos.id })
+      .select({ id: acervoArquivos.id, statusProcessamento: acervoArquivos.statusProcessamento })
       .from(acervoArquivos)
       .where(and(
         eq(acervoArquivos.id, arquivoId),
@@ -31,10 +50,13 @@ export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{
       .limit(1);
 
     if (!arquivo) {
-      return {
-        sucesso: false,
-        mensagem: 'Arquivo não encontrado.'
-      };
+      return operationFailure('NOT_FOUND', 'Arquivo não encontrado.');
+    }
+    if (arquivo.statusProcessamento !== 'concluido') {
+      return operationFailure(
+        'CONFLICT',
+        'O processamento do arquivo ainda não foi concluído com sucesso.'
+      );
     }
 
     // 1. Busca os chunks do arquivo que possuem tópicos associados
@@ -49,10 +71,7 @@ export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{
       .where(eq(acervoChunks.arquivoId, arquivoId));
 
     if (chunks.length === 0) {
-      return {
-        sucesso: false,
-        mensagem: 'Não foram encontrados chunks com tópicos classificados neste arquivo.'
-      };
+      return operationFailure('NOT_FOUND', 'Não há conteúdo classificado disponível para geração.');
     }
 
     // 2. Agrupa o texto por tópico
@@ -69,7 +88,21 @@ export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{
 
     // 3. Para cada tópico, gera os artefatos com Gemini (Antigravity engine)
     for (const [topicoId, data] of chunksPorTopico.entries()) {
-      const artefatos = await gerarArtefatosGeminiComFallback(data.texto, data.topicoNome);
+      let artefatos;
+      try {
+        artefatos = await gerarArtefatosGemini(data.texto, data.topicoNome);
+      } catch (error) {
+        if (error instanceof GeminiGenerationError) {
+          logOperationalFailure('curadoria.generation.provider', 'external_service');
+          return operationFailure(
+            'EXTERNAL_SERVICE_ERROR',
+            itensGerados > 0
+              ? 'A geração foi interrompida após persistência parcial. Revise a fila antes de tentar novamente.'
+              : 'O serviço de inteligência artificial não concluiu a geração. Tente novamente mais tarde.'
+          );
+        }
+        throw error;
+      }
 
       // A. Gravar Resumo
       const [resumo] = await db
@@ -83,15 +116,18 @@ export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{
           status: 'rascunho',
           origem: 'gerado'
         })
-        .returning();
+        .returning({ id: materiais.id });
+      if (!resumo) throw new Error('material_insert_not_confirmed');
 
-      await db.insert(curadoriaFila).values({
+      const [filaResumo] = await db.insert(curadoriaFila).values({
         artefatoTipo: 'resumo',
         artefatoId: resumo.id,
         topicoId,
         prioridade: 2,
         decisao: 'pendente'
-      });
+      }).returning({ id: curadoriaFila.id });
+      if (!filaResumo) throw new Error('queue_insert_not_confirmed');
+      itensGerados++;
 
       // B. Gravar Flashcards
       for (const fc of artefatos.flashcards) {
@@ -104,15 +140,18 @@ export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{
             estilo: 'enem',
             status: 'rascunho'
           })
-          .returning();
+          .returning({ id: perguntasAtivas.id });
+        if (!card) throw new Error('flashcard_insert_not_confirmed');
 
-        await db.insert(curadoriaFila).values({
+        const [filaCard] = await db.insert(curadoriaFila).values({
           artefatoTipo: 'flashcard',
           artefatoId: card.id,
           topicoId,
           prioridade: 1,
           decisao: 'pendente'
-        });
+        }).returning({ id: curadoriaFila.id });
+        if (!filaCard) throw new Error('queue_insert_not_confirmed');
+        itensGerados++;
       }
 
       // C. Gravar Questoes
@@ -123,12 +162,13 @@ export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{
           .from(topicos)
           .where(eq(topicos.id, topicoId))
           .limit(1);
+        if (!topico) throw new Error('topic_not_found');
 
         const [questao] = await db
           .insert(questoes)
           .values({
             procedencia: 'gerada',
-            fonte: 'Claude AI',
+            fonte: 'Google Gemini',
             disciplinaId: topico.disciplinaId,
             estilo: 'enem',
             enunciado: q.enunciado,
@@ -138,28 +178,34 @@ export async function enfileirarGeracaoDeArtefatos(arquivoId: string): Promise<{
             status: 'rascunho',
             arquivoOrigemId: arquivoId
           })
-          .returning();
+          .returning({ id: questoes.id });
+        if (!questao) throw new Error('question_insert_not_confirmed');
 
-        await db.insert(curadoriaFila).values({
+        const [filaQuestao] = await db.insert(curadoriaFila).values({
           artefatoTipo: 'questao',
           artefatoId: questao.id,
           topicoId,
           prioridade: 3,
           decisao: 'pendente'
-        });
+        }).returning({ id: curadoriaFila.id });
+        if (!filaQuestao) throw new Error('queue_insert_not_confirmed');
+        itensGerados++;
       }
     }
 
-    return {
-      sucesso: true,
-      mensagem: 'Artefatos gerados e enviados para a fila de curadoria do responsável.'
-    };
-  } catch (error) {
-    console.error('Erro ao gerar artefatos:', error);
-    return {
-      sucesso: false,
-      mensagem: 'Erro interno ao enfileirar geração de artefatos.'
-    };
+    return operationSuccess({
+      itensGerados,
+      status: 'pendente_curadoria',
+      mensagem: 'Artefatos gerados como rascunho e enviados para revisão do responsável.',
+    });
+  } catch {
+    logOperationalFailure('curadoria.generation.persistence', 'persistence');
+    return operationFailure(
+      'PERSISTENCE_ERROR',
+      itensGerados > 0
+        ? 'A geração teve persistência parcial. Revise a fila antes de tentar novamente.'
+        : 'Não foi possível salvar os artefatos gerados.'
+    );
   }
 }
 
@@ -229,8 +275,9 @@ export async function curarItem(
   decisao: 'aprovado' | 'rejeitado' | 'editado_e_aprovado',
   novosDados?: any,
   motivoRejeicao?: string
-): Promise<{ sucesso: boolean; mensagem: string }> {
+): Promise<OperationResult<{ curadoriaId: string; decisao: typeof decisao; mensagem: string }>> {
   const responsavel = await requireRole('responsavel');
+  let artefatoAlterado = false;
 
   try {
     const [item] = await db
@@ -240,7 +287,7 @@ export async function curarItem(
       .limit(1);
 
     if (!item) {
-      return { sucesso: false, mensagem: 'Item de curadoria não encontrado.' };
+      return operationFailure('NOT_FOUND', 'Item de curadoria não encontrado.');
     }
 
     const editado = decisao === 'editado_e_aprovado';
@@ -250,7 +297,7 @@ export async function curarItem(
 
     // 1. Atualiza o artefato de origem
     if (item.artefatoTipo === 'resumo') {
-      await db
+      const [materialAtualizado] = await db
         .update(materiais)
         .set({
           status: decisao === 'rejeitado' ? 'rejeitado' : 'aprovado',
@@ -259,16 +306,26 @@ export async function curarItem(
           aprovadoPor: decisao === 'rejeitado' ? null : responsavel.id,
           aprovadoEm: decisao === 'rejeitado' ? null : new Date()
         })
-        .where(eq(materiais.id, item.artefatoId));
+        .where(eq(materiais.id, item.artefatoId))
+        .returning({ id: materiais.id });
+      if (!materialAtualizado) {
+        return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
+      }
+      artefatoAlterado = true;
     } else if (item.artefatoTipo === 'flashcard') {
-      await db
+      const [flashcardAtualizado] = await db
         .update(perguntasAtivas)
         .set({
           status: decisao === 'rejeitado' ? 'rejeitado' : 'aprovado',
           pergunta: editado && novosDados?.pergunta ? novosDados.pergunta : undefined,
           resposta: editado && novosDados?.resposta ? novosDados.resposta : undefined
         })
-        .where(eq(perguntasAtivas.id, item.artefatoId));
+        .where(eq(perguntasAtivas.id, item.artefatoId))
+        .returning({ id: perguntasAtivas.id });
+      if (!flashcardAtualizado) {
+        return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
+      }
+      artefatoAlterado = true;
 
       // Se aprovado, insere o flashcard na tabela de FSRS `cards` para estudos do estudante
       if (decisao === 'aprovado' || decisao === 'editado_e_aprovado') {
@@ -277,9 +334,10 @@ export async function curarItem(
           .from(perguntasAtivas)
           .where(eq(perguntasAtivas.id, item.artefatoId))
           .limit(1);
+        if (!flashcard) throw new Error('approved_flashcard_not_found');
 
         // Criar card de repetição FSRS
-        await db.insert(cards).values({
+        const [cardCriado] = await db.insert(cards).values({
           perfilId: estudante!.id,
           topicoId: item.topicoId,
           frente: flashcard.pergunta,
@@ -295,10 +353,11 @@ export async function curarItem(
           reps: 0,
           lapses: 0,
           state: 'new'
-        });
+        }).returning({ id: cards.id });
+        if (!cardCriado) throw new Error('fsrs_card_insert_not_confirmed');
       }
     } else if (item.artefatoTipo === 'questao') {
-      await db
+      const [questaoAtualizada] = await db
         .update(questoes)
         .set({
           status: decisao === 'rejeitado' ? 'rejeitado' : 'aprovado',
@@ -306,11 +365,18 @@ export async function curarItem(
           alternativas: editado && novosDados?.alternativas ? novosDados.alternativas : undefined,
           gabarito: editado && novosDados?.gabarito ? novosDados.gabarito : undefined
         })
-        .where(eq(questoes.id, item.artefatoId));
+        .where(eq(questoes.id, item.artefatoId))
+        .returning({ id: questoes.id });
+      if (!questaoAtualizada) {
+        return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
+      }
+      artefatoAlterado = true;
+    } else {
+      return operationFailure('VALIDATION_ERROR', 'Tipo de artefato de curadoria inválido.');
     }
 
     // 2. Atualiza a fila de curadoria
-    await db
+    const [filaAtualizada] = await db
       .update(curadoriaFila)
       .set({
         decisao,
@@ -318,11 +384,23 @@ export async function curarItem(
         motivoRejeicao: decisao === 'rejeitado' ? motivoRejeicao : null,
         editado
       })
-      .where(eq(curadoriaFila.id, curadoriaId));
+      .where(eq(curadoriaFila.id, curadoriaId))
+      .returning({ id: curadoriaFila.id });
+    if (!filaAtualizada) throw new Error('curation_queue_update_not_confirmed');
 
-    return { sucesso: true, mensagem: `Item curado com sucesso (${decisao}).` };
+    return operationSuccess({
+      curadoriaId,
+      decisao,
+      mensagem: 'Decisão de curadoria salva com sucesso.',
+    });
   } catch (error) {
-    console.error('Erro na curadoria do item:', error);
-    return { sucesso: false, mensagem: 'Erro ao salvar decisão de curadoria.' };
+    if (error instanceof AuthorizationError) throw error;
+    logOperationalFailure('curadoria.decision', 'persistence');
+    return operationFailure(
+      'PERSISTENCE_ERROR',
+      artefatoAlterado
+        ? 'A decisão teve persistência parcial. Atualize a fila antes de tentar novamente.'
+        : 'Não foi possível salvar a decisão de curadoria.'
+    );
   }
 }

@@ -34,7 +34,7 @@ export function getSupabaseClient(): SupabaseClient {
 export const supabase = new Proxy({} as SupabaseClient, {
   get(_target, prop) {
     const client = getSupabaseClient();
-    const value = (client as any)[prop];
+    const value = (client as unknown as Record<PropertyKey, unknown>)[prop];
     return typeof value === 'function' ? value.bind(client) : value;
   }
 });
@@ -56,9 +56,9 @@ export async function uploadToSupabaseStorage(key: string, body: Buffer, content
       throw error;
     }
     return data.path;
-  } catch (error) {
-    console.error('Erro ao fazer upload para o Supabase Storage:', error instanceof Error ? error.message : 'Erro desconhecido');
-    throw error;
+  } catch {
+    console.error('[storage] upload_failed');
+    throw new Error('Falha ao armazenar o arquivo.');
   }
 }
 
@@ -76,8 +76,8 @@ export async function obterUrlAssinadaSupabase(key: string, expiracaoSegundos = 
       throw error;
     }
     return data.signedUrl;
-  } catch (error) {
-    console.error('Erro ao gerar URL assinada do Supabase Storage:', error instanceof Error ? error.message : 'Erro desconhecido');
-    throw error;
+  } catch {
+    console.error('[storage] signed_url_failed');
+    throw new Error('Falha ao gerar acesso temporário ao arquivo.');
   }
 }

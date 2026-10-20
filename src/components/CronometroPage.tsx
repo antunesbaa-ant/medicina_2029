@@ -41,6 +41,7 @@ export default function CronometroPage() {
   const topicoIdParam = searchParams.get('topicoId');
 
   const [loading, setLoading] = useState(true);
+  const [erroOperacao, setErroOperacao] = useState<string>('');
   const [sessaoId, setSessaoId] = useState<string>('');
   const [blocoId, setBlocoId] = useState<string>('');
   const [topicoId, setTopicoId] = useState<string>('');
@@ -143,12 +144,20 @@ export default function CronometroPage() {
         }
       }
 
-      // Se falhou em achar dados, define mocks
-      bId = bId || 'b-1';
-      tId = tId || 't-mat-1';
+      if (!bId || !tId) {
+        setErroOperacao('Não foi possível identificar o bloco e o tópico da sessão. Volte ao ciclo e tente novamente.');
+        setLoading(false);
+        return;
+      }
 
-      // Inicia sessão no backend/mock
-      const sId = await iniciarSessao(bId, tId);
+      let sId: string;
+      try {
+        sId = await iniciarSessao(bId, tId);
+      } catch {
+        setErroOperacao('Não foi possível iniciar a sessão. Tente novamente.');
+        setLoading(false);
+        return;
+      }
       
       setSessaoId(sId);
       setBlocoId(bId);
@@ -203,7 +212,7 @@ export default function CronometroPage() {
         if (prev <= 1) {
           // Etapa concluída! Ir para a próxima etapa.
           if (timerRef.current) clearInterval(timerRef.current);
-          avancarEtapaAutomatico();
+          void avancarEtapaAutomatico();
           return 0;
         }
         
@@ -224,58 +233,66 @@ export default function CronometroPage() {
   }, [estaRodando, etapa]);
 
   // Avançar etapa automaticamente quando o tempo acaba
-  const avancarEtapaAutomatico = () => {
+  const avancarEtapaAutomatico = async () => {
     setEstaRodando(false);
-    if (etapa === 'revisao') {
-      atualizarSessaoBackend('conteudo');
-      setEtapa('conteudo');
-      setTempoRestante(TEMPO_ETAPAS.conteudo);
-      setEstaRodando(true);
-    } else if (etapa === 'conteudo') {
-      atualizarSessaoBackend('questoes');
-      setEtapa('questoes');
-      setTempoRestante(TEMPO_ETAPAS.questoes);
-      setEstaRodando(true);
-    } else if (etapa === 'questoes') {
-      atualizarSessaoBackend('registro');
-      setEtapa('registro');
-      setTempoRestante(TEMPO_ETAPAS.registro);
-      setEstaRodando(true);
-    } else if (etapa === 'registro') {
-      // O registro acabou, finalizar estudo e ir para a pausa
-      handleFinalizarEstudo();
-    } else if (etapa === 'pausa') {
-      // Pausa concluída, limpar cronômetro e voltar para Hoje
-      limparCronometroERedirecionar();
+    setErroOperacao('');
+    try {
+      if (etapa === 'revisao') {
+        await atualizarSessaoBackend('conteudo');
+        setEtapa('conteudo');
+        setTempoRestante(TEMPO_ETAPAS.conteudo);
+        setEstaRodando(true);
+      } else if (etapa === 'conteudo') {
+        await atualizarSessaoBackend('questoes');
+        setEtapa('questoes');
+        setTempoRestante(TEMPO_ETAPAS.questoes);
+        setEstaRodando(true);
+      } else if (etapa === 'questoes') {
+        await atualizarSessaoBackend('registro');
+        setEtapa('registro');
+        setTempoRestante(TEMPO_ETAPAS.registro);
+        setEstaRodando(true);
+      } else if (etapa === 'registro') {
+        await handleFinalizarEstudo();
+      } else if (etapa === 'pausa') {
+        limparCronometroERedirecionar();
+      }
+    } catch {
+      setErroOperacao('Não foi possível salvar o avanço automático. Tente novamente.');
     }
   };
 
   // Atualizar etapa no backend
   const atualizarSessaoBackend = async (novaEtapa: 'conteudo' | 'questoes' | 'registro') => {
-    if (sessaoId && !sessaoId.startsWith('sessao-mock')) {
+    if (sessaoId) {
       await atualizarSessao(sessaoId, { etapaAtingida: novaEtapa });
     }
   };
 
   // Pular Etapa Manualmente
-  const handlePularEtapa = () => {
+  const handlePularEtapa = async () => {
     setEstaRodando(false);
-    if (etapa === 'revisao') {
-      atualizarSessaoBackend('conteudo');
-      setEtapa('conteudo');
-      setTempoRestante(TEMPO_ETAPAS.conteudo);
-    } else if (etapa === 'conteudo') {
-      atualizarSessaoBackend('questoes');
-      setEtapa('questoes');
-      setTempoRestante(TEMPO_ETAPAS.questoes);
-    } else if (etapa === 'questoes') {
-      atualizarSessaoBackend('registro');
-      setEtapa('registro');
-      setTempoRestante(TEMPO_ETAPAS.registro);
-    } else if (etapa === 'registro') {
-      handleFinalizarEstudo();
-    } else if (etapa === 'pausa') {
-      limparCronometroERedirecionar();
+    setErroOperacao('');
+    try {
+      if (etapa === 'revisao') {
+        await atualizarSessaoBackend('conteudo');
+        setEtapa('conteudo');
+        setTempoRestante(TEMPO_ETAPAS.conteudo);
+      } else if (etapa === 'conteudo') {
+        await atualizarSessaoBackend('questoes');
+        setEtapa('questoes');
+        setTempoRestante(TEMPO_ETAPAS.questoes);
+      } else if (etapa === 'questoes') {
+        await atualizarSessaoBackend('registro');
+        setEtapa('registro');
+        setTempoRestante(TEMPO_ETAPAS.registro);
+      } else if (etapa === 'registro') {
+        await handleFinalizarEstudo();
+      } else if (etapa === 'pausa') {
+        limparCronometroERedirecionar();
+      }
+    } catch {
+      setErroOperacao('Não foi possível salvar o avanço da sessão. Tente novamente.');
     }
   };
 
@@ -301,16 +318,21 @@ export default function CronometroPage() {
   // Finalizar a sessão (etapa de registro)
   const handleFinalizarEstudo = async () => {
     setEstaRodando(false);
-    
-    // Concluir no backend
-    await concluirSessao(sessaoId, {
-      encerradaEm: new Date(),
-      segundosEfetivos,
-      segundosPausa,
-      etapaAtingida: 'registro',
-      notaLivre: `${notaLivre.trim()} | Questões: ${questoesAcertadas}/${questoesResolvidas} acertos.`,
-      errosParaRegistrar: errosRegistrados
-    });
+    setErroOperacao('');
+
+    try {
+      await concluirSessao(sessaoId, {
+        encerradaEm: new Date(),
+        segundosEfetivos,
+        segundosPausa,
+        etapaAtingida: 'registro',
+        notaLivre: `${notaLivre.trim()} | Questões: ${questoesAcertadas}/${questoesResolvidas} acertos.`,
+        errosParaRegistrar: errosRegistrados
+      });
+    } catch {
+      setErroOperacao('Não foi possível confirmar a conclusão. Seu progresso local não foi avançado.');
+      return;
+    }
 
     // Atualizar o ponteiro local do ciclo
     const localOrdem = parseInt(localStorage.getItem('medicina_2029_proxima_ordem') || '1', 10);
@@ -337,13 +359,18 @@ export default function CronometroPage() {
     setEstaRodando(false);
     
     // Salvar como não concluída
-    await concluirSessao(sessaoId, {
-      encerradaEm: new Date(),
-      segundosEfetivos,
-      segundosPausa,
-      etapaAtingida: etapa as Exclude<EtapaSessao, 'pausa'>,
-      notaLivre: `Encerrado prematuramente na etapa de ${etapa}. Nota: ${notaLivre.trim()}`
-    });
+    try {
+      await concluirSessao(sessaoId, {
+        encerradaEm: new Date(),
+        segundosEfetivos,
+        segundosPausa,
+        etapaAtingida: etapa as Exclude<EtapaSessao, 'pausa'>,
+        notaLivre: `Encerrado prematuramente na etapa de ${etapa}. Nota: ${notaLivre.trim()}`
+      });
+    } catch {
+      setErroOperacao('Não foi possível salvar o encerramento da sessão. Tente novamente.');
+      return;
+    }
 
     // Limpar local e ir para a Home
     limparCronometroERedirecionar();
@@ -371,6 +398,16 @@ export default function CronometroPage() {
     );
   }
 
+  if (erroOperacao && !sessaoId) {
+    return (
+      <div className="mx-auto max-w-xl p-6">
+        <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {erroOperacao}
+        </p>
+      </div>
+    );
+  }
+
   // Cores de fundo e textos baseadas no estado de estudo ou pausa
   const isPausa = etapa === 'pausa';
   const themeColor = isPausa ? 'text-[#B5502B]' : 'text-[#0E3D4D]';
@@ -393,6 +430,12 @@ export default function CronometroPage() {
           Voltar
         </Link>
       </header>
+
+      {erroOperacao && (
+        <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {erroOperacao}
+        </p>
+      )}
 
       {/* Indicador de Etapas Horizontal (Linha do Tempo) */}
       {!isPausa && (

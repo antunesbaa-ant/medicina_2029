@@ -4,6 +4,13 @@ import { db } from '../../db';
 import { erros, topicos, disciplinas } from '../../db/schema';
 import { eq, and, sql, isNull, isNotNull } from 'drizzle-orm';
 import { requireRole } from '../../lib/authorization';
+import {
+  PublicOperationError,
+  logOperationalFailure,
+  operationFailure,
+  operationSuccess,
+  type OperationResult,
+} from '../../lib/operation-result';
 
 export interface FiltrosCadernoErros {
   disciplinaId?: string;
@@ -54,14 +61,16 @@ export async function obterCadernoErros(filtros?: FiltrosCadernoErros) {
       .orderBy(sql`${erros.resolvidoEm} is not null`, erros.criadoEm);
 
     return list;
-  } catch (error) {
-    console.error('Erro ao obter caderno de erros:', error);
-    return [];
+  } catch {
+    logOperationalFailure('caderno_erros.list', 'persistence');
+    throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível carregar o caderno de erros.');
   }
 }
 
 // 2. Marcar erro como resolvido
-export async function resolverErro(erroId: string): Promise<{ sucesso: boolean; mensagem: string }> {
+export async function resolverErro(
+  erroId: string
+): Promise<OperationResult<{ erroId: string }>> {
   const perfil = await requireRole('estudante');
 
   try {
@@ -72,13 +81,13 @@ export async function resolverErro(erroId: string): Promise<{ sucesso: boolean; 
       .returning({ id: erros.id });
 
     if (!erroAtualizado) {
-      return { sucesso: false, mensagem: 'Registro não encontrado ou acesso não permitido.' };
+      return operationFailure('NOT_FOUND', 'Registro não encontrado ou acesso não permitido.');
     }
 
-    return { sucesso: true, mensagem: 'Erro marcado como resolvido e assimilado.' };
-  } catch (error) {
-    console.error('Erro ao resolver erro:', error);
-    return { sucesso: false, mensagem: 'Erro ao atualizar status.' };
+    return operationSuccess({ erroId: erroAtualizado.id });
+  } catch {
+    logOperationalFailure('caderno_erros.resolve', 'persistence');
+    return operationFailure('PERSISTENCE_ERROR', 'Não foi possível atualizar o registro. Tente novamente.');
   }
 }
 
@@ -90,34 +99,12 @@ export async function registrarErroManual(dados: {
   estilo: 'enem' | 'conteudista' | 'misto';
   tipoErro: 'conteudo' | 'interpretacao' | 'distracao' | 'calculo' | 'tempo';
   conceitoCorreto: string;
-}): Promise<{ sucesso: boolean; mensagem: string }> {
-  const perfil = await requireRole('estudante');
+}): Promise<OperationResult<never>> {
+  await requireRole('estudante');
+  void dados;
 
-  try {
-    // Inserir uma questão mockada para vincular (já que erro exige questaoId)
-    // No caderno de erros manual, criamos uma referência fictícia
-    const mockQuestaoId = '00000000-0000-0000-0000-000000000000'; // ID zerado mockado no seed
-
-    // Para evitar quebrar chave estrangeira no Drizzle,
-    // buscamos a primeira questão disponível ou criamos com id fixado se necessário
-    await db
-      .insert(erros)
-      .values({
-        perfilId: perfil.id,
-        questaoId: mockQuestaoId,
-        tentativaId: mockQuestaoId, // mock no banco
-        descricaoLivre: dados.descricaoLivre,
-        disciplinaId: dados.disciplinaId,
-        topicoId: dados.topicoId,
-        estilo: dados.estilo,
-        tipoErro: dados.tipoErro,
-        conceitoCorreto: dados.conceitoCorreto
-      })
-      .returning();
-
-    return { sucesso: true, mensagem: 'Erro registrado manualmente no seu Caderno de Erros.' };
-  } catch (error) {
-    console.error('Erro ao registrar erro manual:', error);
-    return { sucesso: false, mensagem: 'Erro ao registrar erro.' };
-  }
+  return operationFailure(
+    'VALIDATION_ERROR',
+    'O registro manual exige uma questão e uma tentativa persistidas. Registre o erro durante uma sessão de estudo.'
+  );
 }

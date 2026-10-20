@@ -1,7 +1,7 @@
 import * as pdfParseModule from 'pdf-parse';
 import { db } from '../db';
-import { acervoArquivos, acervoPaginas, acervoChunks, topicos, disciplinas } from '../db/schema';
-import { eq, sql } from 'drizzle-orm';
+import { topicos } from '../db/schema';
+import { eq } from 'drizzle-orm';
 import crypto from 'crypto';
 
 export interface ProcessamentoStatus {
@@ -12,10 +12,13 @@ export interface ProcessamentoStatus {
 
 // 1. Extração de PDF
 export async function extrairTextoPDF(pdfBuffer: Buffer): Promise<Array<{ numero: number; texto: string; metodo: 'nativo' | 'ocr' | 'visao'; confianca: number }>> {
-  let pdfParse = pdfParseModule as any;
-  if (pdfParse.default) pdfParse = pdfParse.default;
-  if (pdfParse.default) pdfParse = pdfParse.default;
-  const result = await pdfParse(pdfBuffer);
+  type PdfParser = (buffer: Buffer) => Promise<{ text: string }>;
+  let pdfParse: unknown = pdfParseModule;
+  for (let depth = 0; depth < 2 && typeof pdfParse !== 'function'; depth++) {
+    pdfParse = (pdfParse as { default?: unknown })?.default;
+  }
+  if (typeof pdfParse !== 'function') throw new Error('PDF parser indisponível.');
+  const result = await (pdfParse as PdfParser)(pdfBuffer);
   
   // pdf-parse junta todo o texto. Para separar por página, podemos usar o delimitador de página se estiver presente,
   // ou parsear por página de forma customizada. pdf-parse retorna o texto bruto em result.text.
@@ -31,12 +34,12 @@ export async function extrairTextoPDF(pdfBuffer: Buffer): Promise<Array<{ numero
   for (const pageText of textPages) {
     const textCleaned = pageText.trim();
     if (textCleaned.length > 0) {
-      const eScaneada = textCleaned.length < 50; // Se tiver muito pouco texto, provavelmente é escaneada
       paginasTexto.push({
         numero: pageNum,
         texto: textCleaned,
-        metodo: eScaneada ? 'ocr' : 'nativo',
-        confianca: eScaneada ? 0.85 : 1.0
+        // Texto curto não comprova que OCR foi executado; este fluxo usa somente pdf-parse.
+        metodo: 'nativo',
+        confianca: textCleaned.length < 50 ? 0.5 : 1.0
       });
       pageNum++;
     }
@@ -210,43 +213,22 @@ export interface ResultadoBusca {
   similaridade: number;
 }
 
+export class EmbeddingServiceUnavailableError extends Error {
+  constructor() {
+    super('O serviço de embeddings não está configurado.');
+    this.name = 'EmbeddingServiceUnavailableError';
+  }
+}
+
 export async function buscaHibridaAcervo(
-  query: string,
-  disciplinaId?: string,
-  limit: number = 5
+  _query: string,
+  _disciplinaId?: string,
+  _limit: number = 5
 ): Promise<ResultadoBusca[]> {
-  // Geramos o embedding da query
-  const queryVector = gerarMockEmbedding(query);
-  const sqlQueryVector = `[${queryVector.join(',')}]`;
-
-  // Drizzle sql para cálculo de distância cosseno no pgvector (1 - (embedding <=> queryVector))
-  const similaridadeSql = sql<number>`1 - (embedding <=> ${sqlQueryVector}::vector)`;
-
-  // Busca no banco
-  // Para fins da Fase 2, faremos a busca baseada em pgvector e fallback em like de texto
-  const chunksData = await db
-    .select({
-      chunkId: acervoChunks.id,
-      arquivoId: acervoChunks.arquivoId,
-      arquivoTitulo: acervoArquivos.titulo,
-      paginaInicial: acervoChunks.paginaInicial,
-      paginaFinal: acervoChunks.paginaFinal,
-      texto: acervoChunks.texto,
-      similaridade: similaridadeSql
-    })
-    .from(acervoChunks)
-    .innerJoin(acervoArquivos, eq(acervoChunks.arquivoId, acervoArquivos.id))
-    .where(disciplinaId ? eq(acervoArquivos.disciplinaId, disciplinaId) : undefined)
-    .orderBy(sql`embedding <=> ${sqlQueryVector}::vector`)
-    .limit(limit);
-
-  return chunksData.map(c => ({
-    chunkId: c.chunkId,
-    arquivoId: c.arquivoId,
-    arquivoTitulo: c.arquivoTitulo,
-    paginaInicial: c.paginaInicial,
-    paginaFinal: c.paginaFinal,
-    texto: c.texto,
-    similaridade: Math.max(0, Math.min(1, c.similaridade)) // Clampa entre 0 e 1
-  }));
+  void _query;
+  void _disciplinaId;
+  void _limit;
+  // Não há provedor real de embeddings nesta fase. Uma similaridade derivada do
+  // vetor hash determinístico seria conteúdo fictício apresentado como busca real.
+  throw new EmbeddingServiceUnavailableError();
 }

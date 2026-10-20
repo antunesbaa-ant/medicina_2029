@@ -57,16 +57,14 @@ describe('Fase 7 - Redações & Repertório Sociocultural', () => {
     vi.clearAllMocks();
   });
 
-  it('deve obter generos cadastrados (mock)', async () => {
+  it('distingue ausência real de gêneros sem fabricar dados', async () => {
     const list = await obterGenerosUECE();
-    expect(Array.isArray(list)).toBe(true);
-    expect(list.length).toBeGreaterThan(0);
+    expect(list).toEqual([]);
   });
 
-  it('deve obter repertorios (mock)', async () => {
+  it('distingue ausência real de repertórios sem fabricar dados', async () => {
     const list = await obterRepertorios();
-    expect(Array.isArray(list)).toBe(true);
-    expect(list.length).toBeGreaterThan(0);
+    expect(list).toEqual([]);
     const mockedDb = db as unknown as { where: ReturnType<typeof vi.fn> };
     expect(mockedDb.where).toHaveBeenLastCalledWith(eq(repertorios.perfilId, 'perfil-1'));
   });
@@ -83,7 +81,7 @@ describe('Fase 7 - Redações & Repertório Sociocultural', () => {
       texto: 'Texto de Redação completo',
       minutosGastos: 60
     });
-    expect(res.sucesso).toBe(true);
+    expect(res.ok).toBe(true);
     const mockedDb = db as unknown as { values: ReturnType<typeof vi.fn> };
     expect(mockedDb.values).toHaveBeenLastCalledWith(expect.objectContaining({
       perfilId: 'perfil-1'
@@ -97,11 +95,43 @@ describe('Fase 7 - Redações & Repertório Sociocultural', () => {
       temasAplicaveis: ['Tecnologia'],
       categoria: 'Sociologia'
     });
-    expect(res.sucesso).toBe(true);
+    expect(res.ok).toBe(true);
     const mockedDb = db as unknown as { values: ReturnType<typeof vi.fn> };
     expect(mockedDb.values).toHaveBeenLastCalledWith(expect.objectContaining({
       perfilId: 'perfil-1'
     }));
+  });
+
+  it('não confirma redação quando INSERT não retorna registro', async () => {
+    const mockedDb = db as unknown as { returning: ReturnType<typeof vi.fn> };
+    mockedDb.returning.mockResolvedValueOnce([]);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const res = await registrarRedacao({
+      formato: 'enem',
+      tema: 'Tema',
+      texto: 'Texto',
+      minutosGastos: 30,
+    });
+
+    expect(res).toMatchObject({ ok: false, code: 'PERSISTENCE_ERROR' });
+    consoleError.mockRestore();
+  });
+
+  it('não confirma repertório quando INSERT não retorna registro', async () => {
+    const mockedDb = db as unknown as { returning: ReturnType<typeof vi.fn> };
+    mockedDb.returning.mockResolvedValueOnce([]);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    const res = await registrarRepertorio({
+      referencia: 'Referência',
+      resumo2Linhas: 'Resumo',
+      temasAplicaveis: [],
+      categoria: 'História',
+    });
+
+    expect(res).toMatchObject({ ok: false, code: 'PERSISTENCE_ERROR' });
+    consoleError.mockRestore();
   });
 
 });
