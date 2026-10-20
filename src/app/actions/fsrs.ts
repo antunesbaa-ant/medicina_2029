@@ -2,10 +2,15 @@
 
 import { db } from '../../db';
 import { cards, cardRevisoes, topicos, disciplinas } from '../../db/schema';
-import { eq, and, lte, sql } from 'drizzle-orm';
+import { eq, and, lte, desc } from 'drizzle-orm';
 import { FSRS, Card as FSRSCard, State, Rating } from 'ts-fsrs';
 import { obterEstadoFSRS, obterRatingFSRS } from '../../lib/studysystem';
 import { requireRole } from '../../lib/authorization';
+import {
+  PublicOperationError,
+  logOperationalFailure,
+  type OperationErrorCode,
+} from '../../lib/operation-result';
 
 // 1. Obter Cards Due (Vencidos) do Estudante
 export async function obterCardsParaRevisao() {
@@ -46,95 +51,159 @@ export async function obterCardsParaRevisao() {
 
     return list;
   } catch (error) {
-    console.error('Erro ao buscar cards due:', error);
-    return [];
+    if (error instanceof PublicOperationError) throw error;
+    logOperationalFailure('fsrs.list_due', 'persistence');
+    throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível carregar os cards para revisão.');
   }
 }
+
+export type ResultadoRevisaoCard =
+  | { sucesso: true; mensagem: string; idempotente?: boolean }
+  | { sucesso: false; mensagem: string; code: OperationErrorCode };
 
 // 2. Registrar Revisão Espaçada (FSRS)
 export async function registrarRevisaoCard(
   cardId: string,
   ratingStr: 'again' | 'hard' | 'good' | 'easy',
   duracaoMs: number
-): Promise<{ sucesso: boolean; mensagem: string }> {
+): Promise<ResultadoRevisaoCard> {
   const perfil = await requireRole('estudante');
 
   try {
-    // A. Busca o card do banco
-    const [cardDb] = await db
-      .select()
-      .from(cards)
-      .where(and(eq(cards.id, cardId), eq(cards.perfilId, perfil.id)))
-      .limit(1);
+    return await db.transaction(async (tx) => {
+      // O lock impede que duas abas calculem o próximo estado a partir da
+      // mesma versão do card.
+      const [cardDb] = await tx
+        .select()
+        .from(cards)
+        .where(and(eq(cards.id, cardId), eq(cards.perfilId, perfil.id)))
+        .limit(1)
+        .for('update');
 
-    if (!cardDb) {
-      return { sucesso: false, mensagem: 'Registro não encontrado ou acesso não permitido.' };
-    }
+      if (!cardDb) {
+        return {
+          sucesso: false,
+          code: 'NOT_FOUND',
+          mensagem: 'Registro não encontrado ou acesso não permitido.',
+        };
+      }
 
-    // B. Mapeia para tipo FSRSCard
-    const cardFSRS: FSRSCard = {
-      due: new Date(cardDb.due),
-      stability: cardDb.stability,
-      difficulty: cardDb.difficulty,
-      elapsed_days: cardDb.elapsedDays,
-      scheduled_days: cardDb.scheduledDays,
-      reps: cardDb.reps,
-      lapses: cardDb.lapses,
-      state: obterEstadoFSRS(cardDb.state),
-      last_review: cardDb.lastReview ? new Date(cardDb.lastReview) : undefined,
-      learning_steps: 0
-    };
+      const now = new Date();
 
-    // C. Instancia e calcula novos parâmetros
-    const f = new FSRS({});
-    const now = new Date();
-    const ratingVal = obterRatingFSRS(ratingStr);
-    
-    // Calcula a nova programação
-    const scheduler = f.repeat(cardFSRS, now);
-    const result = (scheduler as any)[ratingVal];
+      // Sem alterar o schema, o estado já persistido é a chave idempotente do
+      // domínio: um card reagendado para o futuro não pode receber nova revisão.
+      // Se o último log coincide com o payload, trata-se de retry da operação já
+      // confirmada; payload divergente é conflito, nunca uma segunda gravação.
+      if (cardDb.lastReview && new Date(cardDb.due).getTime() > now.getTime()) {
+        const [ultimaRevisao] = await tx
+          .select({
+            revisadoEm: cardRevisoes.revisadoEm,
+            rating: cardRevisoes.rating,
+          })
+          .from(cardRevisoes)
+          .where(eq(cardRevisoes.cardId, cardId))
+          .orderBy(desc(cardRevisoes.revisadoEm))
+          .limit(1);
 
-    // D. Atualiza o card no banco de dados
-    const stateMapping: Record<number, string> = {
-      [State.New]: 'new',
-      [State.Learning]: 'learning',
-      [State.Review]: 'review',
-      [State.Relearning]: 'relearning'
-    };
+        const mesmaRevisao = ultimaRevisao
+          && ultimaRevisao.rating === ratingStr
+          && new Date(ultimaRevisao.revisadoEm).getTime() === new Date(cardDb.lastReview).getTime();
 
-    const nextState = stateMapping[result.card.state as number] || 'review';
+        if (mesmaRevisao) {
+          return {
+            sucesso: true,
+            idempotente: true,
+            mensagem: `Card já revisado. Próxima revisão agendada para: ${new Date(cardDb.due).toLocaleDateString('pt-BR')}`,
+          };
+        }
 
-    await db
-      .update(cards)
-      .set({
-        stability: result.card.stability,
-        difficulty: result.card.difficulty,
-        elapsedDays: result.card.elapsed_days,
-        scheduledDays: result.card.scheduled_days,
-        reps: result.card.reps,
-        lapses: result.card.lapses,
-        state: nextState,
-        due: result.card.due,
-        lastReview: now
-      })
-      .where(and(eq(cards.id, cardId), eq(cards.perfilId, perfil.id)));
+        return {
+          sucesso: false,
+          code: 'CONFLICT',
+          mensagem: 'Este card já foi revisado e teve seu agendamento atualizado.',
+        };
+      }
 
-    // E. Registra o Log da Revisão
-    await db.insert(cardRevisoes).values({
-      cardId: cardId,
-      revisadoEm: now,
-      rating: ratingStr,
-      stateAnterior: cardDb.state,
-      stabilityAnterior: cardDb.stability,
-      duracaoMs: duracaoMs
+      // B. Mapeia para tipo FSRSCard
+      const cardFSRS: FSRSCard = {
+        due: new Date(cardDb.due),
+        stability: cardDb.stability,
+        difficulty: cardDb.difficulty,
+        elapsed_days: cardDb.elapsedDays,
+        scheduled_days: cardDb.scheduledDays,
+        reps: cardDb.reps,
+        lapses: cardDb.lapses,
+        state: obterEstadoFSRS(cardDb.state),
+        last_review: cardDb.lastReview ? new Date(cardDb.lastReview) : undefined,
+        learning_steps: 0,
+      };
+
+      // C. Instancia e calcula novos parâmetros
+      const f = new FSRS({});
+      const ratingVal = obterRatingFSRS(ratingStr) as
+        | Rating.Again
+        | Rating.Hard
+        | Rating.Good
+        | Rating.Easy;
+      const scheduler = f.repeat(cardFSRS, now);
+      const result = scheduler[ratingVal];
+
+      // D. Atualiza o card no banco de dados
+      const stateMapping: Record<number, string> = {
+        [State.New]: 'new',
+        [State.Learning]: 'learning',
+        [State.Review]: 'review',
+        [State.Relearning]: 'relearning',
+      };
+      const nextState = stateMapping[result.card.state as number] || 'review';
+
+      const [cardAtualizado] = await tx
+        .update(cards)
+        .set({
+          stability: result.card.stability,
+          difficulty: result.card.difficulty,
+          elapsedDays: result.card.elapsed_days,
+          scheduledDays: result.card.scheduled_days,
+          reps: result.card.reps,
+          lapses: result.card.lapses,
+          state: nextState,
+          due: result.card.due,
+          lastReview: now,
+        })
+        .where(and(eq(cards.id, cardId), eq(cards.perfilId, perfil.id)))
+        .returning({ id: cards.id });
+
+      if (!cardAtualizado) {
+        throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível confirmar a atualização do card.');
+      }
+
+      // E. Registra o Log da Revisão
+      const [revisaoInserida] = await tx
+        .insert(cardRevisoes)
+        .values({
+          cardId,
+          revisadoEm: now,
+          rating: ratingStr,
+          stateAnterior: cardDb.state,
+          stabilityAnterior: cardDb.stability,
+          duracaoMs,
+        })
+        .returning({ id: cardRevisoes.id });
+
+      if (!revisaoInserida) {
+        throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível confirmar o histórico da revisão.');
+      }
+
+      return {
+        sucesso: true,
+        mensagem: `Card revisado com sucesso. Próxima revisão agendada para: ${result.card.due.toLocaleDateString('pt-BR')}`,
+      };
     });
-
-    return {
-      sucesso: true,
-      mensagem: `Card revisado com sucesso. Próxima revisão agendada para: ${result.card.due.toLocaleDateString('pt-BR')}`
-    };
   } catch (error) {
-    console.error('Erro ao salvar revisão de card:', error);
-    return { sucesso: false, mensagem: 'Erro ao registrar revisão.' };
+    if (error instanceof PublicOperationError) {
+      return { sucesso: false, code: error.code, mensagem: error.message };
+    }
+    logOperationalFailure('fsrs.review', 'persistence');
+    return { sucesso: false, code: 'PERSISTENCE_ERROR', mensagem: 'Erro ao registrar revisão.' };
   }
 }

@@ -1,17 +1,23 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { obterCardsParaRevisao, registrarRevisaoCard } from '../app/actions/fsrs';
 
+type CardRevisao = Awaited<ReturnType<typeof obterCardsParaRevisao>>[number];
+
 export default function RevisaoPage() {
-  const [cardsList, setCardsList] = useState<any[]>([]);
+  const router = useRouter();
+  const [cardsList, setCardsList] = useState<CardRevisao[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [showVerso, setShowVerso] = useState<boolean>(false);
   const [concluido, setConcluido] = useState<boolean>(false);
+  const [salvando, setSalvando] = useState<boolean>(false);
+  const [erroPersistencia, setErroPersistencia] = useState<string | null>(null);
   
   // Timer for active card review duration
-  const cardShownTimestamp = useRef<number>(Date.now());
+  const cardShownTimestamp = useRef<number>(0);
 
   useEffect(() => {
     async function loadCards() {
@@ -34,26 +40,30 @@ export default function RevisaoPage() {
 
   const handleAnswer = async (rating: 'again' | 'hard' | 'good' | 'easy') => {
     const activeCard = cardsList[currentIndex];
-    if (!activeCard) return;
+    if (!activeCard || salvando) return;
 
     const duracaoMs = Date.now() - cardShownTimestamp.current;
-
-    // Move to next card immediately on frontend for snappiness
-    const isLast = currentIndex === cardsList.length - 1;
-    
-    if (isLast) {
-      setConcluido(true);
-    } else {
-      setCurrentIndex(prev => prev + 1);
-      setShowVerso(false);
-      cardShownTimestamp.current = Date.now();
-    }
-
-    // Call backend mutation in background
+    setSalvando(true);
+    setErroPersistencia(null);
     try {
-      await registrarRevisaoCard(activeCard.id, rating, duracaoMs);
-    } catch (err) {
-      console.error('Erro ao registrar revisão de card:', err);
+      const resultado = await registrarRevisaoCard(activeCard.id, rating, duracaoMs);
+      if (!resultado.sucesso) {
+        setErroPersistencia(resultado.mensagem);
+        return;
+      }
+
+      const isLast = currentIndex === cardsList.length - 1;
+      if (isLast) {
+        setConcluido(true);
+      } else {
+        setCurrentIndex(prev => prev + 1);
+        setShowVerso(false);
+        cardShownTimestamp.current = Date.now();
+      }
+    } catch {
+      setErroPersistencia('Não foi possível registrar a revisão. Tente novamente.');
+    } finally {
+      setSalvando(false);
     }
   };
 
@@ -79,7 +89,7 @@ export default function RevisaoPage() {
           Excelente trabalho! Você concluiu todos os cartões programados para hoje. Seus intervalos de repetição FSRS foram recalculados.
         </p>
         <button
-          onClick={() => window.location.href = '/'}
+          onClick={() => router.push('/')}
           className="px-6 py-2.5 bg-[#0E3D4D] hover:bg-[#17607A] text-white text-xs font-bold rounded-lg transition-all"
         >
           Voltar ao Início
@@ -147,7 +157,7 @@ export default function RevisaoPage() {
         {showVerso ? (
           <div className="space-y-2">
             <span className="block text-[10px] font-bold text-center text-gray-400 uppercase tracking-widest">Qual foi sua facilidade?</span>
-            <div className="grid grid-cols-4 gap-2.5">
+            <fieldset disabled={salvando} className="grid grid-cols-4 gap-2.5 disabled:opacity-60">
               <button
                 onClick={() => handleAnswer('again')}
                 className="py-3 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 text-center flex flex-col items-center justify-center gap-1"
@@ -179,7 +189,11 @@ export default function RevisaoPage() {
                 <span>Fácil</span>
                 <span className="text-[8px] font-medium opacity-80">(Espaçar)</span>
               </button>
-            </div>
+            </fieldset>
+            {salvando && <p className="text-xs text-center text-gray-500">Salvando revisão...</p>}
+            {erroPersistencia && (
+              <p role="alert" className="text-xs text-center text-rose-600">{erroPersistencia}</p>
+            )}
           </div>
         ) : (
           <button

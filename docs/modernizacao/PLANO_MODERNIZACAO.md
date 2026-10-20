@@ -207,6 +207,8 @@ F1.15 Testes de segurança/E2E e operação
 
 ### F1.08 — Atomicidade, idempotência e concorrência
 
+**Status:** concluída em 20/10/2026 como **APROVADA COM RESSALVAS**. Sessão, revisão FSRS, registro de simulado, geração de artefatos e decisão de curadoria passaram a usar transações PostgreSQL curtas, confirmação por `RETURNING` e serialização por row lock ou advisory lock. Repetições deixam de duplicar os efeitos prioritários no recorte compatível com o schema atual. A integração das Server Actions com PostgreSQL real e chaves idempotentes persistidas continuam pendentes.
+
 - **Objetivo:** tornar operações multi-etapa consistentes.
 - **Arquivos potencialmente afetados:** `sessao.ts`, `fsrs.ts`, `simulados.ts`, `curadoria.ts`, `reestudo.ts`; schema/migrations de chaves idempotentes.
 - **Dependências:** F1.03 e F1.07.
@@ -215,6 +217,10 @@ F1.15 Testes de segurança/E2E e operação
 - **Testes necessários:** falha em cada etapa, retry, duplo clique, duas abas, concorrência no ponteiro, rollback do log FSRS.
 - **Critérios de aceite:** ou todo o caso de uso persiste ou nada persiste; retry não duplica; ponteiro avança uma vez.
 - **Reversão:** rollback dos commits por fluxo; constraints novas exigem migration reversível ensaiada.
+- **Resultado:** `concluirSessao` serializa a sessão, grava conclusão, erros e ponteiro na mesma transação e trata sessão encerrada como replay; FSRS serializa o card e torna atômicos card+histórico; simulado serializa por estudante e grava cabeçalho+áreas atomicamente; geração de curadoria mantém Gemini fora da transação, grava o lote de artefatos/fila/marcador em uma única transação e deduplica persistência por arquivo; decisão de curadoria torna atômicos artefato, card derivado e fila. A interface de revisão só avança após confirmação.
+- **Validação:** TypeScript, build, lint dos dez arquivos TS/TSX alterados, Drizzle check e `git diff --check` aprovados; 24 arquivos/184 testes Vitest aprovados; suíte RLS em PostgreSQL descartável aprovada em 41/41 cenários. Os testes específicos das Server Actions permanecem mockados; o PostgreSQL real isolado valida RLS e primitivas transacionais, não a integração completa dessas actions.
+- **Ressalvas:** FSRS usa o estado persistido (`lastReview`, `due` e último log) como deduplicação compatível, sem idempotency key durável; chamadas Gemini concorrentes ainda podem duplicar custo antes de uma delas vencer o lock de persistência; Storage continua fora da atomicidade PostgreSQL; não foram aplicadas constraints ou migrations.
+- **Próximo gate:** F1.09 para validação runtime, constraints e desenho explícito das chaves idempotentes persistidas, sem aplicar a contração F1.03-R automaticamente.
 
 ### F1.09 — Validação runtime e integridade relacional
 

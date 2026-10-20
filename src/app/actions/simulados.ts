@@ -2,7 +2,7 @@
 
 import { db } from '../../db';
 import { simulados, simuladoAreas, simuladoAnalise } from '../../db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 import { requireRole } from '../../lib/authorization';
 import {
   PublicOperationError,
@@ -76,57 +76,63 @@ export async function registrarSimulado(
   const perfil = await requireRole('estudante');
 
   try {
-    // Trava de simulados: impede novo simulado com análise pendente
-    const simuladosExistentes = await listarSimuladosDoPerfil(perfil.id);
-    const temPendente = simuladosExistentes.some(s => !s.analise || !s.analise.concluida);
-    if (temPendente) {
-      return operationFailure('CONFLICT', 'Não é permitido registrar um novo simulado enquanto houver uma análise pendente.');
-    }
-
     if (dados.areas.some((area) => area.total <= 0 || area.acertos < 0 || area.acertos > area.total)) {
       return operationFailure('VALIDATION_ERROR', 'Os totais e acertos das áreas são inválidos.');
     }
 
-    // A. Inserir simulado principal
-    const [novoSimulado] = await db
-      .insert(simulados)
-      .values({
-        perfilId: perfil.id,
-        formato: dados.formato,
-        data: new Date(dados.data),
-        condicoesReais: dados.condicoesReais,
-        duracaoMin: dados.duracaoMin,
-        local: dados.local,
-        composicaoProcedencia: dados.composicaoProcedencia
-      })
-      .returning();
+    return await db.transaction(async (tx) => {
+      // Serializa por estudante inclusive quando ainda não existe linha para bloquear.
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`simulado:${perfil.id}`}::text, 0))`
+      );
 
-    if (!novoSimulado) {
-      logOperationalFailure('simulados.insert_without_returning', 'persistence');
-      return operationFailure('PERSISTENCE_ERROR', 'Não foi possível confirmar o registro do simulado.');
-    }
+      const existentes = await tx
+        .select({ id: simulados.id, analiseConcluida: simuladoAnalise.concluida })
+        .from(simulados)
+        .leftJoin(simuladoAnalise, eq(simuladoAnalise.simuladoId, simulados.id))
+        .where(eq(simulados.perfilId, perfil.id));
 
-    // B. Inserir áreas
-    for (const area of dados.areas) {
-      const pct = (area.acertos / area.total) * 100;
-      const [areaInserida] = await db
-        .insert(simuladoAreas)
-        .values({
-          simuladoId: novoSimulado.id,
-          area: area.area,
-          acertos: area.acertos,
-          total: area.total,
-          notaEstimada: Math.round(pct * 8.5),
-        })
-        .returning({ id: simuladoAreas.id });
-
-      if (!areaInserida) {
-        logOperationalFailure('simulados.area_insert_without_returning', 'persistence');
-        return operationFailure('PERSISTENCE_ERROR', 'O simulado foi iniciado, mas não foi possível confirmar todas as áreas.');
+      if (existentes.some((simulado) => simulado.analiseConcluida !== true)) {
+        return operationFailure('CONFLICT', 'Não é permitido registrar um novo simulado enquanto houver uma análise pendente.');
       }
-    }
 
-    return operationSuccess({ simuladoId: novoSimulado.id, analiseStatus: 'pendente' });
+      const [novoSimulado] = await tx
+        .insert(simulados)
+        .values({
+          perfilId: perfil.id,
+          formato: dados.formato,
+          data: new Date(dados.data),
+          condicoesReais: dados.condicoesReais,
+          duracaoMin: dados.duracaoMin,
+          local: dados.local,
+          composicaoProcedencia: dados.composicaoProcedencia
+        })
+        .returning();
+
+      if (!novoSimulado) {
+        throw new Error('simulado_insert_not_confirmed');
+      }
+
+      for (const area of dados.areas) {
+        const pct = (area.acertos / area.total) * 100;
+        const [areaInserida] = await tx
+          .insert(simuladoAreas)
+          .values({
+            simuladoId: novoSimulado.id,
+            area: area.area,
+            acertos: area.acertos,
+            total: area.total,
+            notaEstimada: Math.round(pct * 8.5),
+          })
+          .returning({ id: simuladoAreas.id });
+
+        if (!areaInserida) {
+          throw new Error('simulado_area_insert_not_confirmed');
+        }
+      }
+
+      return operationSuccess({ simuladoId: novoSimulado.id, analiseStatus: 'pendente' });
+    });
   } catch (error) {
     if (error instanceof PublicOperationError) {
       return operationFailure(error.code, error.message);

@@ -1,89 +1,128 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { registrarRevisaoCard, obterCardsParaRevisao } from './fsrs';
-import { FSRS, Card as FSRSCard, State, Rating } from 'ts-fsrs';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { FSRS, Card as FSRSCard, Rating, State } from 'ts-fsrs';
+import { obterCardsParaRevisao, registrarRevisaoCard } from './fsrs';
 
 vi.mock('../../lib/authorization', () => ({
-  requireAuthenticatedProfile: vi.fn().mockResolvedValue({
-    id: 'perfil-1',
-    authUserId: 'auth-1',
-    nome: 'Estudante Teste',
-    email: null,
-    papel: 'estudante',
-  }),
-  requireRole: vi.fn().mockResolvedValue({
-    id: 'perfil-1',
-    authUserId: 'auth-1',
-    nome: 'Estudante Teste',
-    email: null,
-    papel: 'estudante',
-  }),
-  requireManagedStudentProfile: vi.fn().mockResolvedValue({
-    id: 'perfil-1',
-    authUserId: 'auth-1',
-    nome: 'Estudante Teste',
-    email: null,
-    papel: 'estudante',
-  }),
-  assertOwnership: vi.fn(),
+  requireRole: vi.fn().mockResolvedValue({ id: 'perfil-1', papel: 'estudante' }),
 }));
 
-// Mock DB
-vi.mock('../../db', () => {
-  const queryBuilder: any = {
-    insert: vi.fn().mockReturnThis(),
-    update: vi.fn().mockReturnThis(),
-    delete: vi.fn().mockReturnThis(),
-    set: vi.fn().mockReturnThis(),
-    values: vi.fn().mockReturnThis(),
-    returning: vi.fn().mockResolvedValue([{ id: 'mock-id' }]),
-    select: vi.fn().mockReturnThis(),
-    from: vi.fn().mockReturnThis(),
-    innerJoin: vi.fn().mockReturnThis(),
-    where: vi.fn().mockReturnThis(),
-    groupBy: vi.fn().mockReturnThis(),
-    orderBy: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    then: (resolve: any) => resolve([])
+const dbDouble = vi.hoisted(() => {
+  type Result = unknown[] | Error;
+  const queues = { select: [] as Result[], update: [] as Result[], insert: [] as Result[] };
+  const next = (kind: keyof typeof queues) => queues[kind].shift() ?? [];
+  const makeQuery = (result: Result) => {
+    const query: Record<string, unknown> = {};
+    for (const method of ['from', 'where', 'limit', 'orderBy', 'innerJoin', 'for', 'set', 'values', 'returning']) {
+      query[method] = vi.fn(() => query);
+    }
+    query.then = (resolve: (value: unknown[]) => unknown, reject?: (reason: unknown) => unknown) => (
+      result instanceof Error ? Promise.reject(result) : Promise.resolve(result)
+    ).then(resolve, reject);
+    return query;
   };
-  return { db: queryBuilder };
+
+  const db: Record<string, unknown> = {};
+  db.select = vi.fn(() => makeQuery(next('select')));
+  db.update = vi.fn(() => makeQuery(next('update')));
+  db.insert = vi.fn(() => makeQuery(next('insert')));
+  db.transaction = vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(db));
+  return { db, queues };
 });
 
-describe('FSRS Spaced Repetition Tests', () => {
+vi.mock('../../db', () => ({ db: dbDouble.db }));
 
+const cardPendente = {
+  id: 'card-1', perfilId: 'perfil-1', topicoId: 'topico-1', frente: 'Frente', verso: 'Verso',
+  origem: 'manual', status: 'aprovado', suspenso: false, fonteChunkIds: null,
+  due: new Date('2026-10-20T10:00:00Z'), stability: 1, difficulty: 5,
+  elapsedDays: 0, scheduledDays: 0, reps: 0, lapses: 0, state: 'new', lastReview: null,
+};
+
+describe('FSRS Spaced Repetition Tests', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dbDouble.queues.select.length = 0;
+    dbDouble.queues.update.length = 0;
+    dbDouble.queues.insert.length = 0;
   });
 
-  it('deve buscar cards pendentes', async () => {
-    const list = await obterCardsParaRevisao();
-    expect(Array.isArray(list)).toBe(true);
+  it('diferencia ausência real de cards de falha de consulta', async () => {
+    dbDouble.queues.select.push([]);
+    await expect(obterCardsParaRevisao()).resolves.toEqual([]);
+
+    dbDouble.queues.select.push(new Error('connection string secreta'));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    await expect(obterCardsParaRevisao()).rejects.toMatchObject({
+      code: 'PERSISTENCE_ERROR', message: 'Não foi possível carregar os cards para revisão.',
+    });
+    consoleError.mockRestore();
   });
 
-  it('deve falhar ao registrar revisao de card inexistente', async () => {
-    const res = await registrarRevisaoCard('non-existent', 'good', 2500);
-    expect(res.sucesso).toBe(false);
+  it('falha sem efeitos ao registrar card inexistente', async () => {
+    dbDouble.queues.select.push([]);
+    await expect(registrarRevisaoCard('non-existent', 'good', 2500)).resolves.toEqual({
+      sucesso: false, code: 'NOT_FOUND', mensagem: 'Registro não encontrado ou acesso não permitido.',
+    });
+    expect(dbDouble.db.update).not.toHaveBeenCalled();
+    expect(dbDouble.db.insert).not.toHaveBeenCalled();
   });
 
-  it('deve instanciar ts-fsrs corretamente', () => {
+  it('confirma update e histórico dentro de uma única transação', async () => {
+    dbDouble.queues.select.push([cardPendente]);
+    dbDouble.queues.update.push([{ id: 'card-1' }]);
+    dbDouble.queues.insert.push([{ id: 'revisao-1' }]);
+
+    const res = await registrarRevisaoCard('card-1', 'good', 2500);
+    expect(res.sucesso).toBe(true);
+    expect(dbDouble.db.transaction).toHaveBeenCalledOnce();
+    expect(dbDouble.db.update).toHaveBeenCalledOnce();
+    expect(dbDouble.db.insert).toHaveBeenCalledOnce();
+  });
+
+  it('falha a transação quando o histórico não é confirmado', async () => {
+    dbDouble.queues.select.push([cardPendente]);
+    dbDouble.queues.update.push([{ id: 'card-1' }]);
+    dbDouble.queues.insert.push([]);
+    await expect(registrarRevisaoCard('card-1', 'good', 2500)).resolves.toMatchObject({
+      sucesso: false, code: 'PERSISTENCE_ERROR',
+    });
+  });
+
+  it('trata retry idêntico como sucesso idempotente sem nova escrita', async () => {
+    const revisadoEm = new Date();
+    dbDouble.queues.select.push(
+      [{ ...cardPendente, lastReview: revisadoEm, due: new Date(Date.now() + 86_400_000) }],
+      [{ revisadoEm, rating: 'good', duracaoMs: 2500 }],
+    );
+
+    await expect(registrarRevisaoCard('card-1', 'good', 2500)).resolves.toMatchObject({
+      sucesso: true, idempotente: true,
+    });
+    expect(dbDouble.db.update).not.toHaveBeenCalled();
+    expect(dbDouble.db.insert).not.toHaveBeenCalled();
+  });
+
+  it('rejeita payload concorrente divergente para card já reagendado', async () => {
+    const revisadoEm = new Date();
+    dbDouble.queues.select.push(
+      [{ ...cardPendente, lastReview: revisadoEm, due: new Date(Date.now() + 86_400_000) }],
+      [{ revisadoEm, rating: 'good', duracaoMs: 2500 }],
+    );
+
+    await expect(registrarRevisaoCard('card-1', 'easy', 2600)).resolves.toMatchObject({
+      sucesso: false, code: 'CONFLICT',
+    });
+    expect(dbDouble.db.update).not.toHaveBeenCalled();
+    expect(dbDouble.db.insert).not.toHaveBeenCalled();
+  });
+
+  it('instancia ts-fsrs corretamente', () => {
     const f = new FSRS({});
-    expect(f).toBeDefined();
-
     const card: FSRSCard = {
-      due: new Date(),
-      stability: 1.0,
-      difficulty: 5.0,
-      elapsed_days: 0,
-      scheduled_days: 0,
-      reps: 0,
-      lapses: 0,
-      state: State.New,
-      last_review: undefined,
-      learning_steps: 0
+      due: new Date(), stability: 1, difficulty: 5, elapsed_days: 0,
+      scheduled_days: 0, reps: 0, lapses: 0, state: State.New,
+      last_review: undefined, learning_steps: 0,
     };
-
-    const scheduler = f.repeat(card, new Date());
-    expect(scheduler[Rating.Good]).toBeDefined();
-    expect(scheduler[Rating.Good].card.stability).toBeGreaterThan(0);
+    expect(f.repeat(card, new Date())[Rating.Good].card.stability).toBeGreaterThan(0);
   });
-
 });

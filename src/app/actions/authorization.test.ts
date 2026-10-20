@@ -53,6 +53,7 @@ const dbDouble = vi.hoisted(() => {
       'set',
       'returning',
       'onConflictDoUpdate',
+      'for',
     ];
 
     for (const method of chainMethods) {
@@ -80,7 +81,8 @@ const dbDouble = vi.hoisted(() => {
     select: vi.fn(() => makeQuery(nextResult('select'))),
     insert: vi.fn(() => makeQuery(nextResult('insert'))),
     update: vi.fn(() => makeQuery(nextResult('update'))),
-    transaction: vi.fn(),
+    execute: vi.fn().mockResolvedValue([]),
+    transaction: vi.fn(async (callback: (transaction: unknown) => Promise<unknown>) => callback(db)),
   };
 
   return { db, queues, valuesCalls };
@@ -275,6 +277,7 @@ describe('Autorização das Server Actions', () => {
 
     expect(card).toEqual({
       sucesso: false,
+      code: 'NOT_FOUND',
       mensagem: 'Registro não encontrado ou acesso não permitido.',
     });
     expect(dbDouble.db.update).not.toHaveBeenCalled();

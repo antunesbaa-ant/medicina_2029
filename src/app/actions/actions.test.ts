@@ -55,6 +55,7 @@ interface MockQuery {
   limit: ReturnType<typeof vi.fn>;
   innerJoin: ReturnType<typeof vi.fn>;
   orderBy: ReturnType<typeof vi.fn>;
+  for: ReturnType<typeof vi.fn>;
   values: ReturnType<typeof vi.fn>;
   onConflictDoUpdate: ReturnType<typeof vi.fn>;
   returning: ReturnType<typeof vi.fn>;
@@ -68,6 +69,7 @@ interface MockDb {
   update: () => MockQuery;
   delete: () => MockQuery;
   transaction: (callback: (transaction: MockDb) => unknown) => Promise<unknown>;
+  execute: () => Promise<unknown>;
 }
 
 // Mock da conexão com o banco de dados e do Drizzle ORM
@@ -83,6 +85,7 @@ vi.mock('../../db', () => {
       query.limit = vi.fn().mockReturnValue(query);
       query.innerJoin = vi.fn().mockReturnValue(query);
       query.orderBy = vi.fn().mockReturnValue(query);
+      query.for = vi.fn().mockReturnValue(query);
       query.then = (resolve: MockResolver) => {
         const result = selectMockedOutputs[selectCallsCount];
         selectCallsCount++;
@@ -127,7 +130,8 @@ vi.mock('../../db', () => {
     },
     transaction: async (callback: (transaction: MockDb) => unknown) => {
       return await callback(mockDb);
-    }
+    },
+    execute: async () => [],
   };
   return { db: mockDb };
 });
@@ -260,6 +264,13 @@ describe('Server Actions - Fase 1', () => {
       });
       consoleError.mockRestore();
     });
+
+    it('reutiliza sessão aberta em retry sem novo INSERT', async () => {
+      selectMockedOutputs = [[{ id: 'sessao-aberta' }]];
+
+      await expect(iniciarSessao('bloco-1', 'topico-1')).resolves.toBe('sessao-aberta');
+      expect(insertCallsCount).toBe(0);
+    });
   });
 
   describe('atualizarSessao()', () => {
@@ -300,6 +311,22 @@ describe('Server Actions - Fase 1', () => {
   });
 
   describe('concluirSessao()', () => {
+    it('trata repetição de sessão já encerrada como idempotente', async () => {
+      const sessaoEncerrada = {
+        id: 'sessao-123', perfilId: 'perfil-1', cicloBlocoId: 'bloco-1',
+        topicoId: 'topico-1', encerradaEm: new Date(), concluida: true,
+      };
+      selectMockedOutputs = [[{
+        sessao: sessaoEncerrada,
+        bloco: { id: 'bloco-1', cicloId: 'ciclo-1', ordem: 1 },
+      }]];
+
+      await expect(concluirSessao('sessao-123', { etapaAtingida: 'registro' }))
+        .resolves.toEqual(sessaoEncerrada);
+      expect(updateCallsCount).toBe(0);
+      expect(insertCallsCount).toBe(0);
+    });
+
     it('não prossegue nem confirma quando UPDATE não retorna sessão', async () => {
       selectMockedOutputs = [[{
         sessao: {
@@ -328,7 +355,6 @@ describe('Server Actions - Fase 1', () => {
       
       selectMockedOutputs = [
         [{ sessao: sessaoMock, bloco: blocoMock }], // 1a chamada: dados da sessao + bloco
-        [{ id: 'bloco-1' }, { id: 'bloco-2' }],     // 2a chamada: blocos do ciclo (total = 2)
       ];
 
       const sessaoConcluidaMock = {
@@ -341,10 +367,6 @@ describe('Server Actions - Fase 1', () => {
         [sessaoConcluidaMock], // Atualização da sessão
       ];
 
-      insertMockedOutputs = [
-        [], // Upsert do ciclo estado
-      ];
-
       const res = await concluirSessao('sessao-123', {
         etapaAtingida: 'questoes',
         segundosEfetivos: 1800,
@@ -353,6 +375,7 @@ describe('Server Actions - Fase 1', () => {
 
       expect(res.concluida).toBe(false);
       expect(res.etapaAtingida).toBe('questoes');
+      expect(insertCallsCount).toBe(0);
     });
 
     it('deve concluir como "true" se a etapa atingida for "registro"', async () => {
@@ -375,7 +398,7 @@ describe('Server Actions - Fase 1', () => {
       ];
 
       insertMockedOutputs = [
-        [], // Upsert cicloEstado
+        [{ cicloId: 'ciclo-1' }], // Upsert cicloEstado
       ];
 
       const res = await concluirSessao('sessao-123', {
@@ -409,7 +432,7 @@ describe('Server Actions - Fase 1', () => {
 
       insertMockedOutputs = [
         [{ id: 'erro-1' }], // 1o insert: tabela erros
-        [],                 // 2o insert: upsert cicloEstado
+        [{ cicloId: 'ciclo-1' }], // 2o insert: upsert cicloEstado
       ];
 
       const res = await concluirSessao('sessao-123', {
@@ -429,6 +452,26 @@ describe('Server Actions - Fase 1', () => {
       expect(insertCallsCount).toBe(2); // 1 para erros e 1 para cicloEstado
     });
 
+    it('aborta antes do ponteiro quando o erro derivado não é confirmado', async () => {
+      const sessaoMock = {
+        id: 'sessao-123', perfilId: 'perfil-1', cicloBlocoId: 'bloco-1',
+        topicoId: 'topico-1', segundosEfetivos: 0, segundosPausa: 0,
+      };
+      selectMockedOutputs = [
+        [{ sessao: sessaoMock, bloco: { id: 'bloco-1', cicloId: 'ciclo-1', ordem: 1 } }],
+        [{ disciplinaId: 'd-1', estilo: 'enem' }],
+        [{ id: 'tentativa-1' }],
+      ];
+      updateMockedOutputs = [[{ ...sessaoMock, concluida: true }]];
+      insertMockedOutputs = [[]];
+
+      await expect(concluirSessao('sessao-123', {
+        etapaAtingida: 'registro',
+        errosParaRegistrar: [{ questaoId: 'q-1', tentativaId: 'tentativa-1', tipoErro: 'conteudo' }],
+      })).rejects.toMatchObject({ code: 'PERSISTENCE_ERROR' });
+      expect(insertCallsCount).toBe(1);
+    });
+
     it('deve avançar o ponteiro proximaOrdem no ciclo e resetar para 1 ao passar do limite', async () => {
       const sessaoMock = { id: 'sessao-123', perfilId: 'perfil-1', cicloBlocoId: 'bloco-2', topicoId: 'topico-1', segundosEfetivos: 0, segundosPausa: 0 };
       // Bloco atual é ordem 2 de um total de 2 blocos. ProximaOrdem deve resetar para 1.
@@ -446,7 +489,7 @@ describe('Server Actions - Fase 1', () => {
       ];
 
       insertMockedOutputs = [
-        [], // Upsert do cicloEstado
+        [{ cicloId: 'ciclo-1' }], // Upsert do cicloEstado
       ];
 
       const res = await concluirSessao('sessao-123', {

@@ -10,9 +10,10 @@ import {
   disciplinas,
   acervoChunks,
   acervoArquivos,
-  cards
+  cards,
+  geracoes,
 } from '../../db/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { GeminiGenerationError, gerarArtefatosGemini } from '../../lib/gemini';
 import {
   AuthorizationError,
@@ -32,13 +33,21 @@ interface GeracaoConfirmada {
   mensagem: string;
 }
 
+interface DadosEdicaoCuradoria {
+  titulo?: string;
+  corpo?: string;
+  pergunta?: string;
+  resposta?: string;
+  enunciado?: string;
+  alternativas?: unknown;
+  gabarito?: string;
+}
+
 // 1. Enfileirar Geração de Artefatos a partir do Arquivo
 export async function enfileirarGeracaoDeArtefatos(
   arquivoId: string
 ): Promise<OperationResult<GeracaoConfirmada>> {
   const responsavel = await requireRole('responsavel');
-  let itensGerados = 0;
-
   try {
     const [arquivo] = await db
       .select({ id: acervoArquivos.id, statusProcessamento: acervoArquivos.statusProcessamento })
@@ -59,12 +68,29 @@ export async function enfileirarGeracaoDeArtefatos(
       );
     }
 
+    const [geracaoExistente] = await db
+      .select({ itensGerados: geracoes.itensGerados })
+      .from(geracoes)
+      .where(and(
+        eq(geracoes.arquivoIds, [arquivoId]),
+        eq(geracoes.status, 'concluida')
+      ))
+      .limit(1);
+    if (geracaoExistente) {
+      return operationSuccess({
+        itensGerados: geracaoExistente.itensGerados,
+        status: 'pendente_curadoria',
+        mensagem: 'Os artefatos deste arquivo já foram gerados e permanecem disponíveis para revisão.',
+      });
+    }
+
     // 1. Busca os chunks do arquivo que possuem tópicos associados
     const chunks = await db
       .select({
         texto: acervoChunks.texto,
         topicoId: acervoChunks.topicoId,
-        topicoNome: topicos.nome
+        topicoNome: topicos.nome,
+        disciplinaId: topicos.disciplinaId,
       })
       .from(acervoChunks)
       .innerJoin(topicos, eq(acervoChunks.topicoId, topicos.id))
@@ -75,136 +101,178 @@ export async function enfileirarGeracaoDeArtefatos(
     }
 
     // 2. Agrupa o texto por tópico
-    const chunksPorTopico = new Map<string, { texto: string; topicoNome: string }>();
+    const chunksPorTopico = new Map<string, { texto: string; topicoNome: string; disciplinaId: string }>();
     for (const c of chunks) {
       if (c.topicoId) {
-        const prev = chunksPorTopico.get(c.topicoId) || { texto: '', topicoNome: c.topicoNome };
+        const prev = chunksPorTopico.get(c.topicoId) || {
+          texto: '',
+          topicoNome: c.topicoNome,
+          disciplinaId: c.disciplinaId,
+        };
         chunksPorTopico.set(c.topicoId, {
           texto: prev.texto + '\n' + c.texto,
-          topicoNome: c.topicoNome
+          topicoNome: c.topicoNome,
+          disciplinaId: c.disciplinaId,
         });
       }
     }
 
-    // 3. Para cada tópico, gera os artefatos com Gemini (Antigravity engine)
+    // Geração externa ocorre antes da transação: não é possível torná-la atômica com PostgreSQL.
+    const gerados: Array<{
+      topicoId: string;
+      disciplinaId: string;
+      artefatos: Awaited<ReturnType<typeof gerarArtefatosGemini>>;
+    }> = [];
     for (const [topicoId, data] of chunksPorTopico.entries()) {
-      let artefatos;
       try {
-        artefatos = await gerarArtefatosGemini(data.texto, data.topicoNome);
+        gerados.push({
+          topicoId,
+          disciplinaId: data.disciplinaId,
+          artefatos: await gerarArtefatosGemini(data.texto, data.topicoNome),
+        });
       } catch (error) {
         if (error instanceof GeminiGenerationError) {
           logOperationalFailure('curadoria.generation.provider', 'external_service');
           return operationFailure(
             'EXTERNAL_SERVICE_ERROR',
-            itensGerados > 0
-              ? 'A geração foi interrompida após persistência parcial. Revise a fila antes de tentar novamente.'
-              : 'O serviço de inteligência artificial não concluiu a geração. Tente novamente mais tarde.'
+            'O serviço de inteligência artificial não concluiu a geração. Nenhum artefato foi salvo.'
           );
         }
         throw error;
       }
-
-      // A. Gravar Resumo
-      const [resumo] = await db
-        .insert(materiais)
-        .values({
-          topicoId,
-          titulo: artefatos.resumo.titulo,
-          corpo: artefatos.resumo.corpo,
-          tipo: 'resumo',
-          tempoLeituraMin: artefatos.resumo.tempoLeituraMin,
-          status: 'rascunho',
-          origem: 'gerado'
-        })
-        .returning({ id: materiais.id });
-      if (!resumo) throw new Error('material_insert_not_confirmed');
-
-      const [filaResumo] = await db.insert(curadoriaFila).values({
-        artefatoTipo: 'resumo',
-        artefatoId: resumo.id,
-        topicoId,
-        prioridade: 2,
-        decisao: 'pendente'
-      }).returning({ id: curadoriaFila.id });
-      if (!filaResumo) throw new Error('queue_insert_not_confirmed');
-      itensGerados++;
-
-      // B. Gravar Flashcards
-      for (const fc of artefatos.flashcards) {
-        const [card] = await db
-          .insert(perguntasAtivas)
-          .values({
-            topicoId,
-            pergunta: fc.pergunta,
-            resposta: fc.resposta,
-            estilo: 'enem',
-            status: 'rascunho'
-          })
-          .returning({ id: perguntasAtivas.id });
-        if (!card) throw new Error('flashcard_insert_not_confirmed');
-
-        const [filaCard] = await db.insert(curadoriaFila).values({
-          artefatoTipo: 'flashcard',
-          artefatoId: card.id,
-          topicoId,
-          prioridade: 1,
-          decisao: 'pendente'
-        }).returning({ id: curadoriaFila.id });
-        if (!filaCard) throw new Error('queue_insert_not_confirmed');
-        itensGerados++;
-      }
-
-      // C. Gravar Questoes
-      for (const q of artefatos.questoes) {
-        // Busca a disciplina do tópico
-        const [topico] = await db
-          .select({ disciplinaId: topicos.disciplinaId })
-          .from(topicos)
-          .where(eq(topicos.id, topicoId))
-          .limit(1);
-        if (!topico) throw new Error('topic_not_found');
-
-        const [questao] = await db
-          .insert(questoes)
-          .values({
-            procedencia: 'gerada',
-            fonte: 'Google Gemini',
-            disciplinaId: topico.disciplinaId,
-            estilo: 'enem',
-            enunciado: q.enunciado,
-            alternativas: q.alternativas,
-            gabarito: q.gabarito,
-            resolucao: q.resolucao,
-            status: 'rascunho',
-            arquivoOrigemId: arquivoId
-          })
-          .returning({ id: questoes.id });
-        if (!questao) throw new Error('question_insert_not_confirmed');
-
-        const [filaQuestao] = await db.insert(curadoriaFila).values({
-          artefatoTipo: 'questao',
-          artefatoId: questao.id,
-          topicoId,
-          prioridade: 3,
-          decisao: 'pendente'
-        }).returning({ id: curadoriaFila.id });
-        if (!filaQuestao) throw new Error('queue_insert_not_confirmed');
-        itensGerados++;
-      }
     }
 
-    return operationSuccess({
-      itensGerados,
-      status: 'pendente_curadoria',
-      mensagem: 'Artefatos gerados como rascunho e enviados para revisão do responsável.',
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`curadoria-geracao:${arquivoId}`}::text, 0))`
+      );
+
+      const [concorrente] = await tx
+        .select({ itensGerados: geracoes.itensGerados })
+        .from(geracoes)
+        .where(and(
+          eq(geracoes.arquivoIds, [arquivoId]),
+          eq(geracoes.status, 'concluida')
+        ))
+        .limit(1);
+      if (concorrente) {
+        return operationSuccess({
+          itensGerados: concorrente.itensGerados,
+          status: 'pendente_curadoria',
+          mensagem: 'Os artefatos deste arquivo já foram gerados e permanecem disponíveis para revisão.',
+        });
+      }
+
+      let itensGerados = 0;
+      for (const { topicoId, disciplinaId, artefatos } of gerados) {
+
+        // A. Gravar Resumo
+        const [resumo] = await tx
+          .insert(materiais)
+          .values({
+            topicoId,
+            titulo: artefatos.resumo.titulo,
+            corpo: artefatos.resumo.corpo,
+            tipo: 'resumo',
+            tempoLeituraMin: artefatos.resumo.tempoLeituraMin,
+            status: 'rascunho',
+            origem: 'gerado'
+          })
+          .returning({ id: materiais.id });
+        if (!resumo) throw new Error('material_insert_not_confirmed');
+
+        const [filaResumo] = await tx.insert(curadoriaFila).values({
+          artefatoTipo: 'resumo',
+          artefatoId: resumo.id,
+          topicoId,
+          prioridade: 2,
+          decisao: 'pendente'
+        }).returning({ id: curadoriaFila.id });
+        if (!filaResumo) throw new Error('queue_insert_not_confirmed');
+        itensGerados++;
+
+        // B. Gravar Flashcards
+        for (const fc of artefatos.flashcards) {
+          const [card] = await tx
+            .insert(perguntasAtivas)
+            .values({
+              topicoId,
+              pergunta: fc.pergunta,
+              resposta: fc.resposta,
+              estilo: 'enem',
+              status: 'rascunho'
+            })
+            .returning({ id: perguntasAtivas.id });
+          if (!card) throw new Error('flashcard_insert_not_confirmed');
+
+          const [filaCard] = await tx.insert(curadoriaFila).values({
+            artefatoTipo: 'flashcard',
+            artefatoId: card.id,
+            topicoId,
+            prioridade: 1,
+            decisao: 'pendente'
+          }).returning({ id: curadoriaFila.id });
+          if (!filaCard) throw new Error('queue_insert_not_confirmed');
+          itensGerados++;
+        }
+
+        // C. Gravar Questoes
+        for (const q of artefatos.questoes) {
+          const [questao] = await tx
+            .insert(questoes)
+            .values({
+              procedencia: 'gerada',
+              fonte: 'Google Gemini',
+              disciplinaId,
+              estilo: 'enem',
+              enunciado: q.enunciado,
+              alternativas: q.alternativas,
+              gabarito: q.gabarito,
+              resolucao: q.resolucao,
+              status: 'rascunho',
+              arquivoOrigemId: arquivoId
+            })
+            .returning({ id: questoes.id });
+          if (!questao) throw new Error('question_insert_not_confirmed');
+
+          const [filaQuestao] = await tx.insert(curadoriaFila).values({
+            artefatoTipo: 'questao',
+            artefatoId: questao.id,
+            topicoId,
+            prioridade: 3,
+            decisao: 'pendente'
+          }).returning({ id: curadoriaFila.id });
+          if (!filaQuestao) throw new Error('queue_insert_not_confirmed');
+          itensGerados++;
+        }
+      }
+
+      const [geracaoRegistrada] = await tx.insert(geracoes).values({
+        tipoArtefato: 'lote_curadoria',
+        topicoId: gerados[0].topicoId,
+        arquivoIds: [arquivoId],
+        chunkIds: [],
+        modelo: 'gemini',
+        promptVersao: 'f1.07',
+        custoTokens: 0,
+        iniciadaEm: new Date(),
+        concluidaEm: new Date(),
+        status: 'concluida',
+        itensGerados,
+      }).returning({ id: geracoes.id });
+      if (!geracaoRegistrada) throw new Error('generation_insert_not_confirmed');
+
+      return operationSuccess({
+        itensGerados,
+        status: 'pendente_curadoria',
+        mensagem: 'Artefatos gerados como rascunho e enviados para revisão do responsável.',
+      });
     });
   } catch {
     logOperationalFailure('curadoria.generation.persistence', 'persistence');
     return operationFailure(
       'PERSISTENCE_ERROR',
-      itensGerados > 0
-        ? 'A geração teve persistência parcial. Revise a fila antes de tentar novamente.'
-        : 'Não foi possível salvar os artefatos gerados.'
+      'Não foi possível salvar os artefatos gerados. Nenhuma alteração do lote foi confirmada.'
     );
   }
 }
@@ -230,10 +298,10 @@ export async function obterFilaCuradoria() {
     .where(eq(curadoriaFila.decisao, 'pendente'))
     .orderBy(curadoriaFila.prioridade);
 
-  const list: any[] = [];
+  const list: Array<(typeof itens)[number] & { conteudo: unknown }> = [];
   
   for (const item of itens) {
-    let detalhe: any = null;
+    let detalhe: unknown = null;
 
     if (item.artefatoTipo === 'resumo') {
       const [res] = await db
@@ -273,21 +341,35 @@ export async function obterFilaCuradoria() {
 export async function curarItem(
   curadoriaId: string,
   decisao: 'aprovado' | 'rejeitado' | 'editado_e_aprovado',
-  novosDados?: any,
+  novosDados?: DadosEdicaoCuradoria | null,
   motivoRejeicao?: string
 ): Promise<OperationResult<{ curadoriaId: string; decisao: typeof decisao; mensagem: string }>> {
   const responsavel = await requireRole('responsavel');
-  let artefatoAlterado = false;
-
   try {
-    const [item] = await db
-      .select()
-      .from(curadoriaFila)
-      .where(eq(curadoriaFila.id, curadoriaId))
-      .limit(1);
+    return await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`curadoria-decisao:${curadoriaId}`}::text, 0))`
+      );
+
+      const [item] = await tx
+        .select()
+        .from(curadoriaFila)
+        .where(eq(curadoriaFila.id, curadoriaId))
+        .limit(1);
 
     if (!item) {
       return operationFailure('NOT_FOUND', 'Item de curadoria não encontrado.');
+    }
+
+    if (item.decisao !== 'pendente') {
+      if (item.decisao === decisao) {
+        return operationSuccess({
+          curadoriaId,
+          decisao,
+          mensagem: 'Esta decisão de curadoria já havia sido salva.',
+        });
+      }
+      return operationFailure('CONFLICT', 'O item já recebeu outra decisão de curadoria.');
     }
 
     const editado = decisao === 'editado_e_aprovado';
@@ -297,7 +379,7 @@ export async function curarItem(
 
     // 1. Atualiza o artefato de origem
     if (item.artefatoTipo === 'resumo') {
-      const [materialAtualizado] = await db
+      const [materialAtualizado] = await tx
         .update(materiais)
         .set({
           status: decisao === 'rejeitado' ? 'rejeitado' : 'aprovado',
@@ -311,9 +393,8 @@ export async function curarItem(
       if (!materialAtualizado) {
         return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
       }
-      artefatoAlterado = true;
     } else if (item.artefatoTipo === 'flashcard') {
-      const [flashcardAtualizado] = await db
+      const [flashcardAtualizado] = await tx
         .update(perguntasAtivas)
         .set({
           status: decisao === 'rejeitado' ? 'rejeitado' : 'aprovado',
@@ -325,11 +406,10 @@ export async function curarItem(
       if (!flashcardAtualizado) {
         return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
       }
-      artefatoAlterado = true;
 
       // Se aprovado, insere o flashcard na tabela de FSRS `cards` para estudos do estudante
       if (decisao === 'aprovado' || decisao === 'editado_e_aprovado') {
-        const [flashcard] = await db
+        const [flashcard] = await tx
           .select()
           .from(perguntasAtivas)
           .where(eq(perguntasAtivas.id, item.artefatoId))
@@ -337,7 +417,7 @@ export async function curarItem(
         if (!flashcard) throw new Error('approved_flashcard_not_found');
 
         // Criar card de repetição FSRS
-        const [cardCriado] = await db.insert(cards).values({
+        const [cardCriado] = await tx.insert(cards).values({
           perfilId: estudante!.id,
           topicoId: item.topicoId,
           frente: flashcard.pergunta,
@@ -357,7 +437,7 @@ export async function curarItem(
         if (!cardCriado) throw new Error('fsrs_card_insert_not_confirmed');
       }
     } else if (item.artefatoTipo === 'questao') {
-      const [questaoAtualizada] = await db
+      const [questaoAtualizada] = await tx
         .update(questoes)
         .set({
           status: decisao === 'rejeitado' ? 'rejeitado' : 'aprovado',
@@ -370,13 +450,12 @@ export async function curarItem(
       if (!questaoAtualizada) {
         return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
       }
-      artefatoAlterado = true;
     } else {
       return operationFailure('VALIDATION_ERROR', 'Tipo de artefato de curadoria inválido.');
     }
 
     // 2. Atualiza a fila de curadoria
-    const [filaAtualizada] = await db
+    const [filaAtualizada] = await tx
       .update(curadoriaFila)
       .set({
         decisao,
@@ -384,7 +463,10 @@ export async function curarItem(
         motivoRejeicao: decisao === 'rejeitado' ? motivoRejeicao : null,
         editado
       })
-      .where(eq(curadoriaFila.id, curadoriaId))
+      .where(and(
+        eq(curadoriaFila.id, curadoriaId),
+        eq(curadoriaFila.decisao, 'pendente')
+      ))
       .returning({ id: curadoriaFila.id });
     if (!filaAtualizada) throw new Error('curation_queue_update_not_confirmed');
 
@@ -393,14 +475,13 @@ export async function curarItem(
       decisao,
       mensagem: 'Decisão de curadoria salva com sucesso.',
     });
+    });
   } catch (error) {
     if (error instanceof AuthorizationError) throw error;
     logOperationalFailure('curadoria.decision', 'persistence');
     return operationFailure(
       'PERSISTENCE_ERROR',
-      artefatoAlterado
-        ? 'A decisão teve persistência parcial. Atualize a fila antes de tentar novamente.'
-        : 'Não foi possível salvar a decisão de curadoria.'
+      'Não foi possível salvar a decisão de curadoria. Nenhuma alteração foi confirmada.'
     );
   }
 }
