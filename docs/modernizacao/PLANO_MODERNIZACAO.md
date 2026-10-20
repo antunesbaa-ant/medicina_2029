@@ -136,6 +136,20 @@ F1.15 Testes de segurança/E2E e operação
   4. *Integração TypeScript:* Helper `withRlsContext` em `src/db/rls-context.ts` para transações atômicas com `medicina.set_context` e limpeza defensiva em `finally`.
   5. *Trust Model:* Formalização de que o banco delega autenticação para o servidor de aplicação (NextAuth) e atua como camada relacional de contenção em profundidade.
 - **Validação:** 26/26 cenários aprovados (18 baseline + 8 cenários de revisão R1–R8) no runner automatizado `scripts/f1_04/run-rls-validation.mjs` sob PGlite PostgreSQL 18.6 com pgvector 0.8.7; rollback atômico e idempotência na re-aplicação comprovados; `npx tsc --noEmit` aprovado; 117/117 testes Vitest aprovados; `npx drizzle-kit check` e `git diff --check` aprovados.
+- **Próximo gate:** F1.04-C para segregação de roles, privilégios mínimos e suíte de conformidade.
+
+### F1.04-C — Conformidade de roles, privilégios mínimos e suíte de segurança
+
+**Status:** concluída em 19/10/2026 como **APROVADA**; segregação estrita dos papéis de banco (`medicina_auth` vs `medicina_app` vs `medicina_anon`), privilégios mínimos em autenticação, proteção irrestrita contra vazamento de credenciais, rollback com remoção atômica do papel de auth, e suíte automatizada expandida para 41 cenários de segurança e isolamento 100% verde em PostgreSQL 18.6 com pgvector.
+
+- **Objetivo:** segregar papéis de banco entre serviço de autenticação e runtime da aplicação, blindar funções e validar 15 novos cenários de conformidade normativa.
+- **Arquivos gerados/afetados:** `docs/modernizacao/propostas/F1_04_RLS_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_04_ROLLBACK_RLS.sql`, `scripts/f1_04/run-rls-validation.mjs`, `docs/modernizacao/RELATORIO_F1_04_C.md`, `~/Documents/MEDICINA_2029_F1_04_C_RELATORIO.md`.
+- **Endurecimentos implementados:**
+  1. *Segregação de Roles:* `medicina_auth` dedicado exclusivamente ao NextAuth (com `EXECUTE` em `medicina.autenticar_por_email` e `SELECT` nas colunas necessárias para checagem); `medicina_app` para as Server Actions cotidianas (sem permissão em `password_hash` e sem `EXECUTE` em `autenticar_por_email`); `medicina_anon` sem privilégios.
+  2. *Defesa de Funções:* `SET search_path = public, medicina, pg_temp;` e `REVOKE ALL ON ALL FUNCTIONS IN SCHEMA medicina FROM PUBLIC;`.
+  3. *Rollback Atômico:* `F1_04_ROLLBACK_RLS.sql` revoga privilégios e remove o papel `medicina_auth` (`DROP ROLE medicina_auth;`), mantendo a reversibilidade total e idempotência.
+  4. *Conformidade C1–C15:* Identidade retirada exclusivamente da sessão, parâmetro do cliente não substitui identidade nem modifica papel, isolamento estrito de queries/mutations para estudante e responsável, login legítimo 100% funcional, bloqueio 42501 em password_hash sob app, negação fail-closed sem contexto, transações com limpeza de contexto, isolamento pós-DISCARD ALL em pool, cumprimento do Princípio 1.2 (painel do responsável consome apenas view quinzenal), barreira administrativa impenetrável e rejeição de falsos sucessos.
+- **Validação:** 41/41 cenários aprovados (18 baseline + 8 revisão F1.04-R + 15 conformidade F1.04-C) no runner automatizado `scripts/f1_04/run-rls-validation.mjs` sob PGlite PostgreSQL 18.6 com pgvector 0.8.7; rollback atômico e idempotência comprovados; `npx tsc --noEmit` aprovado; 123/123 testes Vitest aprovados; `npx drizzle-kit check` e `git diff --check` aprovados.
 - **Próximo gate:** F1.06 (Atualização de dependências críticas e separação de segredos) antes de deploy em ambiente compartilhado.
 
 ### F1.05 — Isolamento imediato do backup/restore
@@ -159,14 +173,18 @@ F1.15 Testes de segurança/E2E e operação
 
 ### F1.06 — Atualização de dependências críticas e separação de segredos
 
-- **Objetivo:** remover vulnerabilidades críticas de runtime e impedir chave cruzada entre provedores.
-- **Arquivos potencialmente afetados:** `package.json`, lockfile, `src/lib/gemini.ts`, documentação/env example futura.
-- **Dependências:** pode ocorrer em paralelo com F1.03/F1.04, mas exige suíte mínima verde.
-- **Riscos:** regressão de framework; mudança de comportamento do Turbopack/middleware; rotação de segredo necessária.
-- **Estratégia:** upgrade patch isolado do Next.js para versão corrigida vigente; atualizar transitivas compatíveis; usar somente chave Gemini no endpoint Gemini; adicionar validação de env no startup.
-- **Testes necessários:** TypeScript, lint baseline, build, smoke de todas as rotas, login, actions críticas e `npm audit`.
-- **Critérios de aceite:** zero vulnerabilidade crítica conhecida no audit; nenhuma chave de outro provedor pode alcançar o endpoint; build e login funcionam.
-- **Reversão:** rollback do lock/package em commit único; se segredo tiver sido exposto, rotação não é revertida.
+**Status:** concluída em 19/10/2026 como **APROVADA**; segregação estrita de provedores de IA (eliminação de `ANTHROPIC_API_KEY` para Gemini e envio por header seguro), eliminação de fallbacks hardcoded em storage e banco, conexões segregadas PostgreSQL (`DATABASE_APP_URL` vs `DATABASE_AUTH_URL` vs `DATABASE_URL`), validação centralizada de ambiente (`src/lib/env.ts`), modelo `.env.example` e suíte com 140/140 testes Vitest aprovados.
+
+- **Objetivo:** remover vulnerabilidades críticas de runtime, impedir chave cruzada entre provedores e eliminar fallbacks inseguros.
+- **Arquivos gerados/afetados:** `src/lib/supabaseStorage.ts`, `src/lib/gemini.ts`, `src/lib/gemini.test.ts`, `src/db/index.ts`, `src/lib/auth-options.ts`, `src/lib/env.ts`, `src/lib/env.test.ts`, `.env.example`, `.gitignore`, `docs/modernizacao/RELATORIO_F1_06.md`, `~/Documents/MEDICINA_2029_F1_06_RELATORIO.md`.
+- **Implementações e endurecimentos:**
+  1. *Eliminação de Fallbacks Hardcoded:* remoção da URL real de projeto Supabase em `supabaseStorage.ts` e credenciais hardcoded em `db/index.ts`.
+  2. *Segregação de Provedores de IA:* `gemini.ts` consome exclusivamente `GEMINI_API_KEY`, rejeita expressamente `ANTHROPIC_API_KEY`, envia credencial via cabeçalho `x-goog-api-key` (nunca em query string) e sanitiza logs de erro.
+  3. *Conexões PostgreSQL Segregadas:* suporte a `DATABASE_AUTH_URL` (para NextAuth sob papel `medicina_auth`), `DATABASE_APP_URL` (para Server Actions cotidianas sob `medicina_app`) e `DATABASE_URL` (fallback seguro).
+  4. *Validação Centralizada (`src/lib/env.ts`):* regras estritas em produção (secret >= 32 chars, proibição de segredos padrão, proibição de localhost em produção, exigência de HTTPS em NEXTAUTH_URL) e regras tolerantes para testes.
+  5. *Documentação de Configuração:* arquivo `.env.example` completo com placeholders seguros e designorado em `.gitignore`.
+- **Validação:** 140/140 testes unitários Vitest aprovados (19 test files, incluindo `gemini.test.ts` e `env.test.ts`); `npx tsc --noEmit` aprovado com 0 erros; `npx drizzle-kit check` aprovado; `git diff --check` aprovado.
+- **Próximo gate:** F1.07 (Contratos explícitos de erro e remoção de falso sucesso).
 
 ### F1.07 — Contratos explícitos de erro e remoção de falso sucesso
 

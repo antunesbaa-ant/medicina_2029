@@ -216,6 +216,11 @@ BEGIN
     CREATE ROLE medicina_app WITH NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE LOGIN;
   END IF;
 
+  -- Papel dedicado exclusivamente ao serviço de autenticação NextAuth
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_auth') THEN
+    CREATE ROLE medicina_auth WITH NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE LOGIN;
+  END IF;
+
   -- Papel anônimo (para conexões sem contexto ou públicas)
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_anon') THEN
     CREATE ROLE medicina_anon WITH NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE LOGIN;
@@ -228,8 +233,10 @@ REVOKE ALL ON SCHEMA medicina FROM PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA medicina FROM PUBLIC;
 
 GRANT USAGE ON SCHEMA medicina TO medicina_app;
+GRANT USAGE ON SCHEMA medicina TO medicina_auth;
 
 -- Concessão explícita de EXECUTE apenas nas funções necessárias para medicina_app
+-- (medicina_app NÃO possui permissão em medicina.autenticar_por_email)
 GRANT EXECUTE ON FUNCTION medicina.current_perfil_id() TO medicina_app;
 GRANT EXECUTE ON FUNCTION medicina.current_papel() TO medicina_app;
 GRANT EXECUTE ON FUNCTION medicina.is_estudante() TO medicina_app;
@@ -237,13 +244,20 @@ GRANT EXECUTE ON FUNCTION medicina.is_responsavel() TO medicina_app;
 GRANT EXECUTE ON FUNCTION medicina.current_managed_estudante_id() TO medicina_app;
 GRANT EXECUTE ON FUNCTION medicina.set_context(uuid, text) TO medicina_app;
 GRANT EXECUTE ON FUNCTION medicina.clear_context() TO medicina_app;
-GRANT EXECUTE ON FUNCTION medicina.autenticar_por_email(text) TO medicina_app;
 
--- 3.2 Permissões no schema public
+-- Concessão explícita de EXECUTE em medicina.autenticar_por_email exclusivamente para medicina_auth
+GRANT EXECUTE ON FUNCTION medicina.autenticar_por_email(text) TO medicina_auth;
+
+-- 3.2 Permissões no schema public para medicina_app
 GRANT USAGE ON SCHEMA public TO medicina_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO medicina_app;
 
--- 3.3 PROTEÇÃO DE COLUNA (Column-Level Grants em public.perfis):
+-- 3.3 Permissões no schema public para medicina_auth (mínimo privilégio para validação de credenciais)
+GRANT USAGE ON SCHEMA public TO medicina_auth;
+GRANT SELECT ON public.allowlist TO medicina_auth;
+GRANT SELECT (id, auth_user_id, nome, email, papel, criado_em) ON public.perfis TO medicina_auth;
+
+-- 3.4 PROTEÇÃO DE COLUNA (Column-Level Grants em public.perfis):
 -- Revoga SELECT em nível de tabela para impedir leitura de password_hash.
 -- Concede SELECT estritamente sobre as colunas seguras.
 REVOKE SELECT ON public.perfis FROM medicina_app;

@@ -208,6 +208,12 @@ BEGIN
     REVOKE ALL ON SCHEMA public FROM medicina_app;
   END IF;
 
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_auth') THEN
+    REVOKE ALL ON ALL TABLES IN SCHEMA public FROM medicina_auth;
+    REVOKE ALL ON SCHEMA public FROM medicina_auth;
+    DROP ROLE medicina_auth;
+  END IF;
+
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_anon') THEN
     REVOKE ALL ON ALL TABLES IN SCHEMA public FROM medicina_anon;
     REVOKE ALL ON SCHEMA public FROM medicina_anon;

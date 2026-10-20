@@ -5,15 +5,16 @@
 // Validação automatizada em ambiente PostgreSQL 18.6 isolado e descartável (PGlite WASM)
 // com pgvector e papéis de privilégio mínimo (NOBYPASSRLS).
 //
-// Cobre as Etapas 8, 9, 10 e 11 + Revisão F1.04-R:
+// Cobre as Etapas 8, 9, 10 e 11 + Revisões F1.04-R e F1.04-C:
 // - Migrations históricas (0000, 0001, 0002)
 // - Expansão compatível F1.03-R (0003_f1_03_r_expansao.sql)
-// - Proposta RLS F1.04 (F1_04_RLS_PROPOSTA.sql)
+// - Proposta RLS F1.04-C (F1_04_RLS_PROPOSTA.sql)
 // - Fixtures artificiais de teste (tests/integration/f1_04/fixtures.sql)
-// - Validação das 18 situações de segurança da Etapa 9
-// - Validação dos 8 cenários adicionais de segurança e auditoria F1.04-R (R1 a R8)
-// - Total de 26 cenários de segurança e isolamento
-// - Rollback e re-aplicação (F1_04_ROLLBACK_RLS.sql)
+// - Validação das 18 situações de segurança da Etapa 9 (1 a 18)
+// - Validação dos 8 cenários de auditoria F1.04-R (R1 a R8)
+// - Validação dos 15 cenários de conformidade e privilégios F1.04-C (C1 a C15)
+// - Total de 41 cenários de segurança, privilégios mínimos e isolamento
+// - Rollback atômico e re-aplicação (F1_04_ROLLBACK_RLS.sql)
 // ============================================================================
 
 import { readFileSync, existsSync } from 'node:fs';
@@ -826,10 +827,14 @@ async function runValidation() {
     // CENÁRIO R6: Anti-enumeração na autenticação por e-mail -> e-mail fora da allowlist retorna 0 linhas
     // ------------------------------------------------------------------------
     {
+      await db.exec('SET ROLE medicina_auth;');
+
       // estudante2 existe em perfis, mas NÃO consta na allowlist
       const resE2 = await db.query('SELECT * FROM medicina.autenticar_por_email($1::text);', ['estudante2.f104@example.invalid']);
       // e-mail inexistente
       const resInexistente = await db.query('SELECT * FROM medicina.autenticar_por_email($1::text);', ['inexistente.f104@example.invalid']);
+
+      await db.exec('SET ROLE medicina_app;');
 
       const passed = resE2.rows.length === 0 && resInexistente.rows.length === 0;
       recordTest('R6', 'Anti-enumeração na autenticação por e-mail -> e-mail fora da allowlist retorna 0 linhas', passed, {
@@ -842,8 +847,12 @@ async function runValidation() {
     // CENÁRIO R7: Autenticação por e-mail para usuário na allowlist -> retorna credencial para NextAuth
     // ------------------------------------------------------------------------
     {
+      await db.exec('SET ROLE medicina_auth;');
+
       // estudante1 consta na allowlist e existe em perfis
       const resE1 = await db.query('SELECT * FROM medicina.autenticar_por_email($1::text);', ['estudante1.f104@example.invalid']);
+
+      await db.exec('SET ROLE medicina_app;');
 
       const row = resE1.rows[0];
       const passed = resE1.rows.length === 1 &&
@@ -920,6 +929,581 @@ async function runValidation() {
       });
     }
 
+    // ========================================================================
+    // CENÁRIOS ADICIONAIS DE CONFORMIDADE E PRIVILÉGIOS (F1.04-C: C1 a C15)
+    // ========================================================================
+    console.log('\n====================================================================');
+    console.log('EXECUTANDO CENÁRIOS ADICIONAIS DE CONFORMIDADE E PRIVILÉGIOS (F1.04-C: C1-C15)');
+    console.log('====================================================================\n');
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C1: Identidade retirada exclusivamente da sessão validada
+    // (tentativa de injetar ID de outro usuário via parâmetro ou body é rejeitada/ignorada)
+    // ------------------------------------------------------------------------
+    {
+      let injectedReadRows = 0;
+      let injectedInsertBlocked = false;
+      let injectedInsertErrorCode = null;
+
+      await db.transaction(async (tx) => {
+        // Sessão autenticada define contexto de Estudante 1
+        await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [S1_ID, 'estudante']);
+
+        // Parâmetro malicioso tentando ler sessões de Estudante 2
+        const resRead = await tx.query('SELECT * FROM sessoes WHERE perfil_id = $1;', [S2_ID]);
+        injectedReadRows = resRead.rows.length;
+
+        // Payload malicioso tentando criar sessão pertencente a Estudante 2
+        try {
+          await tx.query(`
+            INSERT INTO sessoes (
+              id, perfil_id, ciclo_bloco_id, topico_id, iniciada_em, concluida
+            ) VALUES (
+              '42000000-0000-4000-8000-000000000091', $1, '41000000-0000-4000-8000-000000000001',
+              '31000000-0000-4000-8000-000000000001', now(), true
+            );
+          `, [S2_ID]);
+        } catch (err) {
+          injectedInsertBlocked = true;
+          injectedInsertErrorCode = err.code;
+        }
+      });
+
+      const passed = injectedReadRows === 0 && injectedInsertBlocked && injectedInsertErrorCode === '42501';
+      recordTest('C1', 'Identidade da sessão validada -> tentativa de injetar ID alheio é bloqueada por RLS', passed, {
+        leituraInjetadaLinhas: injectedReadRows,
+        insercaoInjetadaBloqueada: injectedInsertBlocked,
+        codigoErroInsercao: injectedInsertErrorCode
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C2: ID fornecido pelo cliente não substitui a identidade autenticada
+    // ------------------------------------------------------------------------
+    {
+      let spoofedUpdateRows = 0;
+      let legitimateUpdateRows = 0;
+
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [S1_ID, 'estudante']);
+
+        // Tentativa de alterar registro passando perfil_id do Estudante 2 no WHERE
+        const resSpoof = await tx.query(`
+          UPDATE sessoes SET nota_livre = 'hackeado'
+          WHERE perfil_id = $1;
+        `, [S2_ID]);
+        spoofedUpdateRows = resSpoof.rowCount ?? resSpoof.rows.length;
+
+        // Atualização legítima passando o próprio perfil autenticado
+        const resLegit = await tx.query(`
+          UPDATE sessoes SET nota_livre = 'legitimo'
+          WHERE perfil_id = $1 AND id = '42000000-0000-4000-8000-000000000001';
+        `, [S1_ID]);
+        legitimateUpdateRows = resLegit.rowCount ?? resLegit.rows.length;
+      });
+
+      const passed = spoofedUpdateRows === 0 && legitimateUpdateRows === 1;
+      recordTest('C2', 'ID fornecido pelo cliente não substitui identidade autenticada -> update indevido afeta 0 linhas', passed, {
+        linhasAfetadasSpoof: spoofedUpdateRows,
+        linhasAfetadasLegitimo: legitimateUpdateRows
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C3: Papel fornecido pelo cliente não modifica a autorização
+    // (ex.: estudante tentar se passar por responsável)
+    // ------------------------------------------------------------------------
+    {
+      let roleSpoofBlocked = false;
+      let roleSpoofErrorCode = null;
+      let isRespUnderStudent = true;
+
+      // Estudante tenta configurar contexto alegando papel de responsável
+      try {
+        await db.transaction(async (tx) => {
+          await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [S1_ID, 'responsavel']);
+        });
+      } catch (err) {
+        roleSpoofBlocked = true;
+        roleSpoofErrorCode = err.code;
+      }
+
+      // Sob contexto legítimo de estudante, verifica se is_responsavel é estritamente false
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [S1_ID, 'estudante']);
+        const res = await tx.query('SELECT medicina.is_responsavel() as is_resp;');
+        isRespUnderStudent = res.rows[0].is_resp;
+      });
+
+      const passed = roleSpoofBlocked && roleSpoofErrorCode === 'P0001' && isRespUnderStudent === false;
+      recordTest('C3', 'Papel fornecido pelo cliente não modifica autorização -> rejeição P0001 e is_responsavel falso', passed, {
+        trocaPapelBloqueada: roleSpoofBlocked,
+        codigoErro: roleSpoofErrorCode,
+        isResponsavelSobEstudante: isRespUnderStudent
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C4: Estudante não assume outro perfil em queries ou mutations
+    // ------------------------------------------------------------------------
+    {
+      let selectS2 = 0;
+      let updateS2 = 0;
+      let deleteS2 = 0;
+      let insertS2Blocked = false;
+      let insertS2ErrorCode = null;
+
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [S1_ID, 'estudante']);
+
+        const rSelect = await tx.query('SELECT * FROM sessoes WHERE perfil_id = $1;', [S2_ID]);
+        selectS2 = rSelect.rows.length;
+
+        const rUpdate = await tx.query("UPDATE cards SET frente = 'hacked' WHERE perfil_id = $1;", [S2_ID]);
+        updateS2 = rUpdate.rowCount ?? rUpdate.rows.length;
+
+        const rDelete = await tx.query('DELETE FROM checkins WHERE perfil_id = $1;', [S2_ID]);
+        deleteS2 = rDelete.rowCount ?? rDelete.rows.length;
+
+        try {
+          await tx.query(`
+            INSERT INTO cards (
+              id, perfil_id, topico_id, frente, verso, status
+            ) VALUES (
+              '50000000-0000-4000-8000-000000000092', $1, '31000000-0000-4000-8000-000000000001',
+              'Frente Fake', 'Verso Fake', 'aprovado'
+            );
+          `, [S2_ID]);
+        } catch (err) {
+          insertS2Blocked = true;
+          insertS2ErrorCode = err.code;
+        }
+      });
+
+      const passed = selectS2 === 0 && updateS2 === 0 && deleteS2 === 0 && insertS2Blocked && insertS2ErrorCode === '42501';
+      recordTest('C4', 'Estudante não assume outro perfil em nenhuma operação CRUD -> zero linhas ou erro 42501', passed, {
+        selectOutroPerfil: selectS2,
+        updateOutroPerfil: updateS2,
+        deleteOutroPerfil: deleteS2,
+        insertOutroPerfilBloqueado: insertS2Blocked,
+        codigoErroInsert: insertS2ErrorCode
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C5: Responsável não assume outro perfil em consultas
+    // ------------------------------------------------------------------------
+    {
+      let revisoesS2Rows = 0;
+      let revisoesS1Rows = 0;
+      let acervoR2Rows = 0;
+
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [R1_ID, 'responsavel']);
+
+        // Tentativa de consultar revisões da estudante 2 (sem vínculo com Responsável 1)
+        const rS2 = await tx.query('SELECT * FROM revisoes_trimestrais WHERE estudante_perfil_id = $1;', [S2_ID]);
+        revisoesS2Rows = rS2.rows.length;
+
+        // Consulta de revisões da estudante 1 (vinculada a Responsável 1)
+        const rS1 = await tx.query('SELECT * FROM revisoes_trimestrais WHERE estudante_perfil_id = $1;', [S1_ID]);
+        revisoesS1Rows = rS1.rows.length;
+
+        // Tentativa de consultar arquivo de acervo enviado por outro responsável (Responsável 2)
+        const rAcervo = await tx.query('SELECT * FROM acervo_arquivos WHERE enviado_por = $1;', [R2_ID]);
+        acervoR2Rows = rAcervo.rows.length;
+      });
+
+      const passed = revisoesS2Rows === 0 && revisoesS1Rows === 1 && acervoR2Rows === 0;
+      recordTest('C5', 'Responsável não assume outro perfil -> acessa apenas estudante vinculada e acervo próprio', passed, {
+        revisoesEstudanteNaoVinculada: revisoesS2Rows,
+        revisoesEstudanteVinculada: revisoesS1Rows,
+        acervoOutroResponsavel: acervoR2Rows
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C6: Login legítimo continua 100% funcional
+    // ------------------------------------------------------------------------
+    {
+      await db.exec('SET ROLE medicina_auth;');
+
+      const resEstudante = await db.query('SELECT * FROM medicina.autenticar_por_email($1::text);', ['estudante1.f104@example.invalid']);
+      const resResponsavel = await db.query('SELECT * FROM medicina.autenticar_por_email($1::text);', ['responsavel1.f104@example.invalid']);
+
+      await db.exec('SET ROLE medicina_app;');
+
+      const rowE = resEstudante.rows[0];
+      const rowR = resResponsavel.rows[0];
+
+      const passed = resEstudante.rows.length === 1 &&
+                     rowE.id === S1_ID &&
+                     rowE.papel === 'estudante' &&
+                     typeof rowE.password_hash === 'string' &&
+                     resResponsavel.rows.length === 1 &&
+                     rowR.id === R1_ID &&
+                     rowR.papel === 'responsavel' &&
+                     typeof rowR.password_hash === 'string';
+
+      recordTest('C6', 'Login legítimo continua 100% funcional -> autentica estudante e responsável na allowlist', passed, {
+        estudanteAutenticada: resEstudante.rows.length === 1,
+        responsavelAutenticado: resResponsavel.rows.length === 1
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C7: Consultas comuns (medicina_app) não expõem hashes de senha (erro 42501)
+    // ------------------------------------------------------------------------
+    {
+      let selectHashBlocked = false;
+      let selectHashErrorCode = null;
+      let selectStarBlocked = false;
+      let selectStarErrorCode = null;
+
+      try {
+        await db.query('SELECT password_hash FROM perfis;');
+      } catch (err) {
+        selectHashBlocked = true;
+        selectHashErrorCode = err.code;
+      }
+
+      try {
+        await db.query('SELECT * FROM perfis;');
+      } catch (err) {
+        selectStarBlocked = true;
+        selectStarErrorCode = err.code;
+      }
+
+      const passed = selectHashBlocked && selectHashErrorCode === '42501' && selectStarBlocked && selectStarErrorCode === '42501';
+      recordTest('C7', 'Consultas cotidianas medicina_app não expõem password_hash -> rejeição 42501 por coluna', passed, {
+        selectHashBloqueado: selectHashBlocked,
+        codigoErroHash: selectHashErrorCode,
+        selectStarBloqueado: selectStarBlocked,
+        codigoErroStar: selectStarErrorCode
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C8: Funções de autenticação respeitam privilégios mínimos
+    // (somente role de auth pode executar autenticar_por_email)
+    // ------------------------------------------------------------------------
+    {
+      let appBlocked = false;
+      let appErrorCode = null;
+      let anonBlocked = false;
+      let anonErrorCode = null;
+      let authSuccess = false;
+
+      // medicina_app tenta executar autenticar_por_email
+      try {
+        await db.query('SELECT * FROM medicina.autenticar_por_email($1::text);', ['estudante1.f104@example.invalid']);
+      } catch (err) {
+        appBlocked = true;
+        appErrorCode = err.code;
+      }
+
+      // medicina_anon tenta executar autenticar_por_email
+      await db.exec('SET ROLE medicina_anon;');
+      try {
+        await db.query('SELECT * FROM medicina.autenticar_por_email($1::text);', ['estudante1.f104@example.invalid']);
+      } catch (err) {
+        anonBlocked = true;
+        anonErrorCode = err.code;
+      }
+
+      // medicina_auth executa autenticar_por_email com sucesso
+      await db.exec('SET ROLE medicina_auth;');
+      try {
+        const res = await db.query('SELECT * FROM medicina.autenticar_por_email($1::text);', ['estudante1.f104@example.invalid']);
+        authSuccess = res.rows.length === 1;
+      } catch (err) {
+        authSuccess = false;
+      }
+
+      await db.exec('SET ROLE medicina_app;');
+
+      const passed = appBlocked && appErrorCode === '42501' && anonBlocked && anonErrorCode === '42501' && authSuccess;
+      recordTest('C8', 'Privilégio mínimo na autenticação -> somente medicina_auth executa autenticar_por_email', passed, {
+        appBloqueado: appBlocked,
+        codigoErroApp: appErrorCode,
+        anonBloqueado: anonBlocked,
+        codigoErroAnon: anonErrorCode,
+        authSucesso: authSuccess
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C9: Operações sem sessão/contexto são negadas fail-closed (0 linhas ou exceção)
+    // ------------------------------------------------------------------------
+    {
+      let insertBlocked = false;
+      let insertErrorCode = null;
+
+      const rSessoes = await db.query('SELECT count(*) as cnt FROM sessoes;');
+      const rCards = await db.query('SELECT count(*) as cnt FROM cards;');
+      const rPerfis = await db.query('SELECT count(*) as cnt FROM perfis;');
+
+      try {
+        await db.query(`
+          INSERT INTO sessoes (
+            id, perfil_id, ciclo_bloco_id, topico_id, iniciada_em, concluida
+          ) VALUES (
+            '42000000-0000-4000-8000-000000000093', '${S1_ID}', '41000000-0000-4000-8000-000000000001',
+            '31000000-0000-4000-8000-000000000001', now(), true
+          );
+        `);
+      } catch (err) {
+        insertBlocked = true;
+        insertErrorCode = err.code;
+      }
+
+      const passed = Number(rSessoes.rows[0].cnt) === 0 &&
+                     Number(rCards.rows[0].cnt) === 0 &&
+                     Number(rPerfis.rows[0].cnt) === 0 &&
+                     insertBlocked && insertErrorCode === '42501';
+
+      recordTest('C9', 'Operações sem sessão/contexto são negadas fail-closed -> 0 linhas lidas e erro 42501 no insert', passed, {
+        sessoesLidas: Number(rSessoes.rows[0].cnt),
+        cardsLidos: Number(rCards.rows[0].cnt),
+        perfisLidos: Number(rPerfis.rows[0].cnt),
+        insercaoBloqueada: insertBlocked,
+        codigoErro: insertErrorCode
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C10: Transações encerram corretamente com commit/rollback e limpeza de contexto
+    // ------------------------------------------------------------------------
+    {
+      // 1. Transação que sofre ROLLBACK
+      try {
+        await db.transaction(async (tx) => {
+          await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [S1_ID, 'estudante']);
+          await tx.query(`
+            INSERT INTO sessoes (
+              id, perfil_id, ciclo_bloco_id, topico_id, iniciada_em, concluida
+            ) VALUES (
+              '42000000-0000-4000-8000-000000000094', '${S1_ID}', '41000000-0000-4000-8000-000000000001',
+              '31000000-0000-4000-8000-000000000001', now(), true
+            );
+          `);
+          throw new Error('Rollback intencional de teste C10');
+        });
+      } catch {
+        // Exceção esperada para disparar rollback
+      }
+
+      // Verifica pós-rollback
+      const pidAposRollback = await db.query('SELECT medicina.current_perfil_id() as pid;');
+      const sessoesAposRollback = await db.query('SELECT * FROM sessoes WHERE id = $1;', ['42000000-0000-4000-8000-000000000094']);
+
+      // 2. Transação que conclui com COMMIT
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [S1_ID, 'estudante']);
+        await tx.query('SELECT medicina.clear_context();');
+      });
+
+      const pidAposCommit = await db.query('SELECT medicina.current_perfil_id() as pid;');
+
+      const passed = pidAposRollback.rows[0].pid === null &&
+                     sessoesAposRollback.rows.length === 0 &&
+                     pidAposCommit.rows[0].pid === null;
+
+      recordTest('C10', 'Transações encerram corretamente com commit/rollback e limpeza de contexto -> sem vazamentos', passed, {
+        perfilIdAposRollback: pidAposRollback.rows[0].pid,
+        registroPersistiuAposRollback: sessoesAposRollback.rows.length > 0,
+        perfilIdAposCommit: pidAposCommit.rows[0].pid
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C11: Conexões reutilizadas não carregam contexto da requisição anterior pós-DISCARD
+    // ------------------------------------------------------------------------
+    {
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [S1_ID, 'estudante']);
+      });
+
+      // Emula reset de conexão efetuado por connection poolers (ex.: PgBouncer)
+      await db.exec('DISCARD ALL;');
+      await db.exec('SET ROLE medicina_app;');
+
+      const pidPostDiscard = await db.query('SELECT medicina.current_perfil_id() as pid, medicina.current_papel() as papel;');
+      const sessoesPostDiscard = await db.query('SELECT count(*) as cnt FROM sessoes;');
+
+      const passed = pidPostDiscard.rows[0].pid === null &&
+                     pidPostDiscard.rows[0].papel === null &&
+                     Number(sessoesPostDiscard.rows[0].cnt) === 0;
+
+      recordTest('C11', 'Conexões reutilizadas não carregam contexto pós-DISCARD ALL -> isolamento perfeito de pool', passed, {
+        perfilIdPosDiscard: pidPostDiscard.rows[0].pid,
+        papelPosDiscard: pidPostDiscard.rows[0].papel,
+        sessoesVisiveis: Number(sessoesPostDiscard.rows[0].cnt)
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C12: Queries protegidas não executam sem contexto apropriado
+    // ------------------------------------------------------------------------
+    {
+      // Tentativas de consulta sem contexto em tabelas protegidas
+      const rAnalise = await db.query('SELECT count(*) as cnt FROM simulado_analise;');
+      const rErros = await db.query('SELECT count(*) as cnt FROM erros;');
+      const rCheckins = await db.query('SELECT count(*) as cnt FROM checkins;');
+      const rRepertorios = await db.query('SELECT count(*) as cnt FROM repertorios;');
+
+      // Consulta dentro de contexto de estudante
+      let analiseSobContexto = 0;
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [S1_ID, 'estudante']);
+        const res = await tx.query('SELECT count(*) as cnt FROM simulado_analise;');
+        analiseSobContexto = Number(res.rows[0].cnt);
+      });
+
+      const passed = Number(rAnalise.rows[0].cnt) === 0 &&
+                     Number(rErros.rows[0].cnt) === 0 &&
+                     Number(rCheckins.rows[0].cnt) === 0 &&
+                     Number(rRepertorios.rows[0].cnt) === 0 &&
+                     analiseSobContexto === 1;
+
+      recordTest('C12', 'Queries protegidas não retornam dados sem contexto apropriado -> retorno exclusivo sob auth', passed, {
+        analiseSemContexto: Number(rAnalise.rows[0].cnt),
+        errosSemContexto: Number(rErros.rows[0].cnt),
+        checkinsSemContexto: Number(rCheckins.rows[0].cnt),
+        repertoriosSemContexto: Number(rRepertorios.rows[0].cnt),
+        analiseSobContexto
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C13: Painel do responsável consome apenas informações agregadas permitidas
+    // (vw_acompanhamento_quinzenal), sem acesso a sessões individuais (Princípio 1.2)
+    // ------------------------------------------------------------------------
+    {
+      let rawSessoesCount = 0;
+      let rawCheckinsCount = 0;
+      let aggregatedViewRows = 0;
+
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [R1_ID, 'responsavel']);
+
+        // Responsável NUNCA lê sessões individuais brutas
+        const rSessoes = await tx.query('SELECT * FROM sessoes;');
+        rawSessoesCount = rSessoes.rows.length;
+
+        // Responsável NUNCA lê checkins individuais brutos
+        const rCheckins = await tx.query('SELECT * FROM checkins;');
+        rawCheckinsCount = rCheckins.rows.length;
+
+        // Responsável lê exclusivamente a view agregada quinzenal autorizada
+        const rView = await tx.query('SELECT * FROM vw_acompanhamento_quinzenal;');
+        aggregatedViewRows = rView.rows.length;
+      });
+
+      const passed = rawSessoesCount === 0 && rawCheckinsCount === 0 && aggregatedViewRows > 0;
+      recordTest('C13', 'Princípio 1.2: Responsável tem zero acesso a sessões brutas e consome apenas view quinzenal', passed, {
+        sessoesBrutasVisiveis: rawSessoesCount,
+        checkinsBrutosVisiveis: rawCheckinsCount,
+        quinzenasAgregadasVisiveis: aggregatedViewRows
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C14: Operações administrativas não são acessíveis por estudantes
+    // ------------------------------------------------------------------------
+    {
+      let filaRows = 0;
+      let acervoRows = 0;
+      let managedEstudanteId = 'not-null';
+      let insertFilaBlocked = false;
+      let insertFilaErrorCode = null;
+
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [S1_ID, 'estudante']);
+
+        const rFila = await tx.query('SELECT * FROM curadoria_fila;');
+        filaRows = rFila.rows.length;
+
+        const rAcervo = await tx.query('SELECT * FROM acervo_arquivos;');
+        acervoRows = rAcervo.rows.length;
+
+        const rManaged = await tx.query('SELECT medicina.current_managed_estudante_id() as mid;');
+        managedEstudanteId = rManaged.rows[0].mid;
+
+        try {
+          await tx.query(`
+            INSERT INTO curadoria_fila (
+              id, artefato_tipo, artefato_id, topico_id, prioridade
+            ) VALUES (
+              '92000000-0000-4000-8000-000000000095', 'questao', '70000000-0000-4000-8000-000000000001',
+              '31000000-0000-4000-8000-000000000001', 1
+            );
+          `);
+        } catch (err) {
+          insertFilaBlocked = true;
+          insertFilaErrorCode = err.code;
+        }
+      });
+
+      const passed = filaRows === 0 && acervoRows === 0 && managedEstudanteId === null && insertFilaBlocked && insertFilaErrorCode === '42501';
+      recordTest('C14', 'Operações administrativas e de curadoria são inacessíveis para estudantes -> isolamento total', passed, {
+        filaCuradoriaLida: filaRows,
+        acervoLido: acervoRows,
+        managedEstudanteId,
+        insertFilaBloqueado: insertFilaBlocked,
+        codigoErroInsert: insertFilaErrorCode
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // CENÁRIO C15: Rejeição de falsos sucessos (operações que falham em autorização/RLS
+    // não retornam status 200/ok: true)
+    // ------------------------------------------------------------------------
+    {
+      let updateRowCount = -1;
+      let deleteRowCount = -1;
+      let insertBlocked = false;
+      let insertErrorCode = null;
+
+      await db.transaction(async (tx) => {
+        await tx.query('SELECT medicina.set_context($1::uuid, $2::text);', [S1_ID, 'estudante']);
+
+        // Tentativa de UPDATE em sessão de outro usuário: o banco deve retornar rowCount = 0
+        const rUpdate = await tx.query("UPDATE sessoes SET nota_livre = 'fake' WHERE perfil_id = $1;", [S2_ID]);
+        updateRowCount = rUpdate.rowCount ?? rUpdate.rows.length;
+
+        // Tentativa de DELETE em redação de outro usuário: deve retornar rowCount = 0
+        const rDelete = await tx.query('DELETE FROM redacoes WHERE perfil_id = $1;', [S2_ID]);
+        deleteRowCount = rDelete.rowCount ?? rDelete.rows.length;
+
+        // Tentativa de INSERT com owner forjado: deve lançar erro 42501 e NÃO passar silenciosamente
+        try {
+          await tx.query(`
+            INSERT INTO sessoes (
+              id, perfil_id, ciclo_bloco_id, topico_id, iniciada_em, concluida
+            ) VALUES (
+              '42000000-0000-4000-8000-000000000096', '${S2_ID}', '41000000-0000-4000-8000-000000000001',
+              '31000000-0000-4000-8000-000000000001', now(), true
+            );
+          `);
+        } catch (err) {
+          insertBlocked = true;
+          insertErrorCode = err.code;
+        }
+      });
+
+      // A rejeição de falsos sucessos exige:
+      // 1. Mutações não autorizadas afetam rigorosamente 0 linhas (rowCount === 0)
+      // 2. Inserções não autorizadas disparam exceção 42501 no banco
+      const passed = updateRowCount === 0 && deleteRowCount === 0 && insertBlocked && insertErrorCode === '42501';
+      recordTest('C15', 'Rejeição de falsos sucessos -> mutações indevidas reportam 0 linhas e inserts disparam 42501', passed, {
+        linhasAfetadasUpdate: updateRowCount,
+        linhasAfetadasDelete: deleteRowCount,
+        insercaoInvalidaDisparouErro: insertBlocked,
+        codigoErro: insertErrorCode
+      });
+    }
+
     // ------------------------------------------------------------------------
     // ENSAIO DE ROLLBACK E RE-APLICAÇÃO (ETAPA 11)
     // ------------------------------------------------------------------------
@@ -953,6 +1537,14 @@ async function runValidation() {
     const tablesWithRls = Number(rlsStatus.rows[0].cnt);
     console.log(`   Tabelas com RLS ativo após rollback (esperado 0): ${tablesWithRls}`);
     testResults.rollback.rlsDesabilitado = tablesWithRls === 0;
+
+    // Verificar se papel medicina_auth foi removido
+    const authRoleStatus = await db.query(`
+      SELECT count(*) as cnt FROM pg_roles WHERE rolname = 'medicina_auth';
+    `);
+    const authRoleCount = Number(authRoleStatus.rows[0].cnt);
+    console.log(`   Papel medicina_auth restante após rollback (esperado 0): ${authRoleCount}`);
+    testResults.rollback.authRoleRemovido = authRoleCount === 0;
 
     console.log('7. Re-aplicando F1_04_RLS_PROPOSTA.sql para comprovar idempotência...');
     await db.exec(sqlProposal);

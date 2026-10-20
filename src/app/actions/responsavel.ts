@@ -27,6 +27,36 @@ export async function obterAcompanhamentoQuinzenal(): Promise<QuinzenaResumo[]> 
   const estudante = await requireManagedStudentProfile();
 
   try {
+    // 1. Tentativa primária sob RLS: consultar a view agregada quinzenal
+    // Respeita estritamente o Princípio 1.2 da ESPEC (zero acesso a sessões brutas)
+    if (typeof (db as any).execute === 'function') {
+      try {
+        const rows = await db.execute(sql`
+          SELECT
+            periodo_rotulo,
+            blocos_concluidos,
+            media_horas_sono,
+            redacoes_escritas,
+            redacoes_reescritas,
+            cards_fsrs_ativos
+          FROM public.vw_acompanhamento_quinzenal
+        `);
+
+        if (rows && rows.length > 0) {
+          return rows.map((r: any) => ({
+            periodoRotulo: r.periodo_rotulo,
+            blocosConcluidos: Number(r.blocos_concluidos || 0),
+            mediaHorasSono: Number(r.media_horas_sono || 0),
+            redacoesEscritas: Number(r.redacoes_escritas || 0),
+            redacoesReescritas: Number(r.redacoes_reescritas || 0),
+            cardsFSRSAtivos: Number(r.cards_fsrs_ativos || 0)
+          }));
+        }
+      } catch {
+        // Se a view não estiver instalada (ambiente pré-RLS), prossegue para o cálculo de compatibilidade
+      }
+    }
+
     const estudantePerfilId = estudante.id;
 
     // Calculamos o intervalo das duas últimas quinzenas

@@ -1,5 +1,3 @@
-import { db } from '../db';
-import { materiais, perguntasAtivas, questoes, curadoriaFila } from '../db/schema';
 import crypto from 'crypto';
 
 export interface ArtefatosGerados {
@@ -20,12 +18,26 @@ export interface ArtefatosGerados {
   }>;
 }
 
-// 1. Função de chamada à API do Gemini (com mock determinístico inteligente como fallback)
+/**
+ * Função de chamada à API do Google Gemini com fallback determinístico seguro.
+ * Conformidade F1.06:
+ * - Utiliza EXCLUSIVAMENTE a variável GEMINI_API_KEY.
+ * - Rejeita sumariamente chaves de outros provedores (ex: ANTHROPIC_API_KEY).
+ * - Envia a credencial via cabeçalho HTTP x-goog-api-key, nunca via query parameter.
+ * - Logs sanitizados que não expõem a chave nem erros detalhados de rede.
+ */
 export async function gerarArtefatosGeminiComFallback(
   conteudoTexto: string,
   topicoNome: string
 ): Promise<ArtefatosGerados> {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.ANTHROPIC_API_KEY;
+  // Verificação defensiva de separação de provedores
+  if (!process.env.GEMINI_API_KEY && process.env.ANTHROPIC_API_KEY) {
+    console.warn(
+      'Segurança: ANTHROPIC_API_KEY detectada no ambiente, mas GEMINI_API_KEY está ausente. Chaves de outros provedores são expressamente rejeitadas para o serviço Gemini.'
+    );
+  }
+
+  const apiKey = process.env.GEMINI_API_KEY;
 
   if (apiKey) {
     try {
@@ -43,13 +55,13 @@ Retorne EXCLUSIVAMENTE em formato JSON puro, seguindo este esquema exato:
 
 Texto base:\n${conteudoTexto}`;
 
-      // Usando a API do Gemini 2.5 Flash nativa via fetch (compatível com a infraestrutura Google/Antigravity)
       const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
           },
           body: JSON.stringify({
             contents: [
@@ -70,23 +82,27 @@ Texto base:\n${conteudoTexto}`;
 
       if (response.ok) {
         const data = await response.json();
-        const jsonText = data.candidates[0].content.parts[0].text;
-        return JSON.parse(jsonText);
+        const jsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (jsonText) {
+          return JSON.parse(jsonText);
+        }
       } else {
-        console.warn('Erro na resposta do Gemini API:', response.statusText);
+        console.warn(`Erro na resposta da API Gemini (código ${response.status}). Utilizando gerador alternativo seguro.`);
       }
-    } catch (e) {
-      console.warn('Falha na chamada da API real do Gemini. Usando gerador alternutivo inteligente.', e);
+    } catch {
+      // Registra mensagem genérica e sanitizada sem vazar credenciais ou cabeçalhos
+      console.warn('Falha na comunicação com a API do Gemini. Utilizando gerador alternativo seguro.');
     }
   }
 
-  // Fallback determinístico inteligente
+  // Fallback determinístico inteligente para testes e desenvolvimento
   return gerarMockArtefatos(conteudoTexto, topicoNome);
 }
 
-// 2. Gerador inteligente de Mock
-function gerarMockArtefatos(conteudo: string, topico: string): ArtefatosGerados {
-  // Limita o tamanho do texto para gerar variações
+/**
+ * Gerador determinístico de Mock inteligente para desenvolvimento e testes
+ */
+export function gerarMockArtefatos(conteudo: string, topico: string): ArtefatosGerados {
   const hash = crypto.createHash('sha256').update(conteudo).digest('hex').slice(0, 8);
 
   return {
