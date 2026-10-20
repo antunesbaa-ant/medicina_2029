@@ -113,14 +113,30 @@ F1.15 Testes de segurança/E2E e operação
 
 ### F1.04 — RLS e views agregadas versionadas
 
+**Status:** concluída em 19/10/2026 como **APROVADA COM RESSALVAS**; proposta completa de RLS e views agregadas versionada fora do journal automático em `docs/modernizacao/propostas/`, suíte de 18 cenários de segurança e isolamento 100% verde em PostgreSQL 18.6 isolado (PGlite), rollback atômico e idempotência comprovados, e nenhuma alteração executada em produção.
+
 - **Objetivo:** tornar a separação estudante/responsável verificável no banco.
-- **Arquivos potencialmente afetados:** novas migrations Drizzle, schema de views/tipos, actions de responsável.
-- **Dependências:** F1.02 e definição da identidade da F1.03; auditoria read-only do Supabase externo aprovada.
-- **Riscos:** lockout total por policy incorreta; conexão owner/service role pode contornar RLS; divergência com policies manuais externas.
-- **Estratégia:** inventariar policies externas; criar migrations idempotentes; habilitar RLS tabela a tabela; views agregadas quinzenais/trimestrais; role de mínimo privilégio; testar em banco descartável.
-- **Testes necessários:** estudante só lê próprios dados e conteúdo aprovado; responsável não lê `sessoes` bruta; anônimo não lê tabela; action não usa role que bypassa RLS.
-- **Critérios de aceite:** policies versionadas para todas as tabelas aplicáveis; matriz de acesso automatizada passa; rollback ensaiado.
-- **Reversão:** migration de rollback testada em banco descartável; nunca desabilitar RLS em produção sem janela e contenção compensatória.
+- **Arquivos gerados/afetados:** `docs/modernizacao/propostas/F1_04_RLS_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_04_ROLLBACK_RLS.sql`, `tests/integration/f1_04/fixtures.sql`, `scripts/f1_04/run-rls-validation.mjs`, `docs/modernizacao/RELATORIO_F1_04.md`.
+- **Dependências:** F1.02 e definição da identidade da F1.03; expansão compatível F1.03-R.
+- **Solução implementada:** Todas as 32 tabelas + `allowlist` receberam `ENABLE/FORCE ROW LEVEL SECURITY`; princípio Fail-Closed com funções de contexto no schema `medicina`; variáveis transacionais `SET LOCAL` para isolamento de connection pooling; proibição estrita de leitura de sessões brutas pelo responsável (Princípio 1.2 da ESPEC); view quinzenal agregada `vw_acompanhamento_quinzenal` e evolução de simulados `vw_simulados_evolucao`; view segura `vw_perfis` omitindo `password_hash`; role de mínimo privilégio `medicina_app` (`NOBYPASSRLS`, `NOSUPERUSER`).
+- **Validação:** PGlite com PostgreSQL 18.6 e pgvector 0.8.7 real; fixtures artificiais `example.invalid`; 18/18 cenários da matriz de segurança aprovados sob `medicina_app` (bloqueios confirmados para acessos cruzados, inserts com owner forjado, vazamento entre transações e DDL); rollback ensaiado e idempotência comprovada; TypeScript, 114/114 testes Vitest, `drizzle-kit check` e `git diff --check` aprovados.
+- **Ressalvas:** A ativação definitiva em produção permanece bloqueada até homologação da infraestrutura com a role `medicina_app` (evitando bypass por superuser) e adaptação da Server Action do responsável para consumir `vw_acompanhamento_quinzenal`.
+- **Próximo gate:** F1.04-R para revisão de segurança, endurecimento de privilégios e integração RLS.
+
+### F1.04-R — Revisão de segurança, endurecimento de privilégios e integração RLS
+
+**Status:** concluída em 19/10/2026 como **APROVADA**; proposta endurecida com proteção de colunas sensíveis (`password_hash`), blindagem de funções `SECURITY DEFINER` e revogação de `EXECUTE` para `PUBLIC`, anti-enumeração na allowlist, formalização do Trust Model do banco de dados, helper transacional TypeScript `withRlsContext` com testes unitários, e suíte expandida para 26 cenários de segurança e isolamento 100% verde em PostgreSQL 18.6 com pgvector.
+
+- **Objetivo:** auditar vulnerabilidades residuais da proposta F1.04, proteger colunas sensíveis via privilégios granulares de banco, fornecer helper de runtime seguro e comprovar isolamento relacional irrestrito.
+- **Arquivos gerados/afetados:** `docs/modernizacao/propostas/F1_04_RLS_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_04_ROLLBACK_RLS.sql`, `src/db/rls-context.ts`, `src/db/rls-context.test.ts`, `scripts/f1_04/run-rls-validation.mjs`, `docs/modernizacao/RELATORIO_F1_04_R.md`, `~/Documents/MEDICINA_2029_F1_04_R_RELATORIO.md`.
+- **Endurecimentos implementados:**
+  1. *Column-Level Grants:* `REVOKE SELECT ON perfis` e concessão apenas em colunas seguras, gerando erro `42501` em tentativas de leitura de `password_hash` sob `medicina_app`.
+  2. *Defesa de Funções:* `REVOKE ALL ON ALL FUNCTIONS IN SCHEMA medicina FROM PUBLIC`, fixação de `SET search_path = public, medicina, pg_temp` e provisionamento do papel `medicina_anon` com bloqueio de chamadas (`42501`).
+  3. *Anti-enumeração:* `medicina.autenticar_por_email` checa compulsoriamente a allowlist e retorna 0 linhas para e-mails não autorizados.
+  4. *Integração TypeScript:* Helper `withRlsContext` em `src/db/rls-context.ts` para transações atômicas com `medicina.set_context` e limpeza defensiva em `finally`.
+  5. *Trust Model:* Formalização de que o banco delega autenticação para o servidor de aplicação (NextAuth) e atua como camada relacional de contenção em profundidade.
+- **Validação:** 26/26 cenários aprovados (18 baseline + 8 cenários de revisão R1–R8) no runner automatizado `scripts/f1_04/run-rls-validation.mjs` sob PGlite PostgreSQL 18.6 com pgvector 0.8.7; rollback atômico e idempotência na re-aplicação comprovados; `npx tsc --noEmit` aprovado; 117/117 testes Vitest aprovados; `npx drizzle-kit check` e `git diff --check` aprovados.
+- **Próximo gate:** F1.06 (Atualização de dependências críticas e separação de segredos) antes de deploy em ambiente compartilhado.
 
 ### F1.05 — Isolamento imediato do backup/restore
 
@@ -280,10 +296,10 @@ O sistema só deve receber dados reais quando todos os itens abaixo estiverem co
 
 ## 6. Próxima tarefa
 
-**Próxima autorização recomendada: F1.04 — RLS e views agregadas versionadas.**
+**Próxima autorização recomendada: F1.06 — Atualização de dependências críticas e separação de segredos.**
 
-Escopo: tornar a separação entre estudante e responsável verificável no banco, inventariar políticas externas de forma autorizada, versionar RLS e views agregadas e validar a matriz de acesso em PostgreSQL descartável antes de qualquer alteração fora do ensaio.
+Escopo: atualizar Next.js para remover vulnerabilidades conhecidas, isolar provedores de segredos e impedir uso cruzado de chaves, mantendo a suíte de testes íntegra.
 
-A expansão F1.03-R continua dependendo de auditoria autorizada e aprovação própria. A contração permanece bloqueada até aplicação compatível implantada, backfill limpo, backup nativo restaurado e nova autorização. A F1.14 continua responsável pela recuperação completa PostgreSQL + Storage; a exportação F1.05 não substitui esse gate.
+A F1.04 concluiu a formulação, versionamento e validação isolada do RLS com 100% de sucesso nos 18 cenários da matriz de segurança. A ativação definitiva em produção permanece bloqueada até homologação da role de aplicação e cutover formal.
 
 Não iniciar automaticamente. Aguardar aprovação explícita.
