@@ -16,53 +16,53 @@ export const MOCK_DISCIPLINAS = {
 // Mocks estáticos de tópicos
 export const MOCK_TOPICOS: Record<string, Array<{ id: string; nome: string; incidenciaEnem: number }>> = {
   'd1d1d1d1-1111-1111-1111-111111111111': [
-    { id: 't-mat-1', nome: 'Razão e Proporção', incidenciaEnem: 5 },
-    { id: 't-mat-2', nome: 'Porcentagem', incidenciaEnem: 5 },
-    { id: 't-mat-3', nome: 'Funções de 1º e 2º Grau', incidenciaEnem: 4 },
-    { id: 't-mat-4', nome: 'Geometria Plana', incidenciaEnem: 4 },
-    { id: 't-mat-5', nome: 'Geometria Espacial', incidenciaEnem: 4 },
-    { id: 't-mat-6', nome: 'Análise Combinatória', incidenciaEnem: 4 },
-    { id: 't-mat-7', nome: 'Probabilidade', incidenciaEnem: 5 }
+    { id: '11111111-1111-4000-8000-000000000001', nome: 'Razão e Proporção', incidenciaEnem: 5 },
+    { id: '11111111-1111-4000-8000-000000000002', nome: 'Porcentagem', incidenciaEnem: 5 },
+    { id: '11111111-1111-4000-8000-000000000003', nome: 'Funções de 1º e 2º Grau', incidenciaEnem: 4 },
+    { id: '11111111-1111-4000-8000-000000000004', nome: 'Geometria Plana', incidenciaEnem: 4 },
+    { id: '11111111-1111-4000-8000-000000000005', nome: 'Geometria Espacial', incidenciaEnem: 4 },
+    { id: '11111111-1111-4000-8000-000000000006', nome: 'Análise Combinatória', incidenciaEnem: 4 },
+    { id: '11111111-1111-4000-8000-000000000007', nome: 'Probabilidade', incidenciaEnem: 5 }
   ],
   'd1d1d1d1-2222-2222-2222-222222222222': [
-    { id: 't-bio-1', nome: 'Citologia e Membrana Celular', incidenciaEnem: 4 },
-    { id: 't-bio-2', nome: 'Bioquímica Celular', incidenciaEnem: 3 },
-    { id: 't-bio-3', nome: 'Ecologia e Ecossistemas', incidenciaEnem: 5 },
-    { id: 't-bio-4', nome: 'Fisiologia Humana', incidenciaEnem: 5 }
+    { id: '11111111-2222-4000-8000-000000000001', nome: 'Citologia e Membrana Celular', incidenciaEnem: 4 },
+    { id: '11111111-2222-4000-8000-000000000002', nome: 'Bioquímica Celular', incidenciaEnem: 3 },
+    { id: '11111111-2222-4000-8000-000000000003', nome: 'Ecologia e Ecossistemas', incidenciaEnem: 5 },
+    { id: '11111111-2222-4000-8000-000000000004', nome: 'Fisiologia Humana', incidenciaEnem: 5 }
   ],
   'd1d1d1d1-3333-3333-3333-333333333333': [
-    { id: 't-red-1', nome: 'Estrutura Dissertativo-Argumentativa ENEM', incidenciaEnem: 5 }
+    { id: '11111111-3333-4000-8000-000000000001', nome: 'Estrutura Dissertativo-Argumentativa ENEM', incidenciaEnem: 5 }
   ],
   'd1d1d1d1-4444-4444-4444-444444444444': [
-    { id: 't-qui-1', nome: 'Atomística e Tabela Periódica', incidenciaEnem: 3 },
-    { id: 't-qui-2', nome: 'Ligações Químicas', incidenciaEnem: 3 },
-    { id: 't-qui-3', nome: 'Estequiometria', incidenciaEnem: 5 },
-    { id: 't-qui-4', nome: 'Química Orgânica', incidenciaEnem: 5 }
+    { id: '11111111-4444-4000-8000-000000000001', nome: 'Atomística e Tabela Periódica', incidenciaEnem: 3 },
+    { id: '11111111-4444-4000-8000-000000000002', nome: 'Ligações Químicas', incidenciaEnem: 3 },
+    { id: '11111111-4444-4000-8000-000000000003', nome: 'Estequiometria', incidenciaEnem: 5 },
+    { id: '11111111-4444-4000-8000-000000000004', nome: 'Química Orgânica', incidenciaEnem: 5 }
   ],
   'd1d1d1d1-5555-5555-5555-555555555555': [
-    { id: 't-fis-1', nome: 'Cinemática e Movimento', incidenciaEnem: 3 },
-    { id: 't-fis-2', nome: 'Leis de Newton e Dinâmica', incidenciaEnem: 4 },
-    { id: 't-fis-3', nome: 'Ondulatória', incidenciaEnem: 5 },
-    { id: 't-fis-4', nome: 'Eletricidade e Circuitos', incidenciaEnem: 5 }
+    { id: '11111111-5555-4000-8000-000000000001', nome: 'Cinemática e Movimento', incidenciaEnem: 3 },
+    { id: '11111111-5555-4000-8000-000000000002', nome: 'Leis de Newton e Dinâmica', incidenciaEnem: 4 },
+    { id: '11111111-5555-4000-8000-000000000003', nome: 'Ondulatória', incidenciaEnem: 5 },
+    { id: '11111111-5555-4000-8000-000000000004', nome: 'Eletricidade e Circuitos', incidenciaEnem: 5 }
   ],
   'd1d1d1d1-6666-6666-6666-666666666666': [
-    { id: 't-lin-1', nome: 'Interpretação de Texto', incidenciaEnem: 5 },
-    { id: 't-lin-2', nome: 'Variação Linguística', incidenciaEnem: 5 }
+    { id: '11111111-6666-4000-8000-000000000001', nome: 'Interpretação de Texto', incidenciaEnem: 5 },
+    { id: '11111111-6666-4000-8000-000000000002', nome: 'Variação Linguística', incidenciaEnem: 5 }
   ],
   'd1d1d1d1-7777-7777-7777-777777777777': [
-    { id: 't-his-1', nome: 'Brasil República', incidenciaEnem: 5 }
+    { id: '11111111-7777-4000-8000-000000000001', nome: 'Brasil República', incidenciaEnem: 5 }
   ],
   'd1d1d1d1-8888-8888-8888-888888888888': [
-    { id: 't-geo-1', nome: 'Geopolítica Global', incidenciaEnem: 4 }
+    { id: '11111111-8888-4000-8000-000000000001', nome: 'Geopolítica Global', incidenciaEnem: 4 }
   ],
   'd1d1d1d1-9999-9999-9999-999999999999': [
-    { id: 't-fil-1', nome: 'Filosofia Moderna e Iluminismo', incidenciaEnem: 4 }
+    { id: '11111111-9999-4000-8000-000000000001', nome: 'Filosofia Moderna e Iluminismo', incidenciaEnem: 4 }
   ],
   'd1d1d1d1-aaaa-aaaa-aaaa-aaaaaaaaaaaa': [
-    { id: 't-soc-1', nome: 'Sociologia e Movimentos Sociais', incidenciaEnem: 4 }
+    { id: '11111111-aaaa-4000-8000-000000000001', nome: 'Sociologia e Movimentos Sociais', incidenciaEnem: 4 }
   ],
   'd1d1d1d1-bbbb-bbbb-bbbb-bbbbbbbbbbbb': [
-    { id: 't-ext-1', nome: 'Vocabulário e Compreensão Textual', incidenciaEnem: 5 }
+    { id: '11111111-bbbb-4000-8000-000000000001', nome: 'Vocabulário e Compreensão Textual', incidenciaEnem: 5 }
   ]
 };
 
@@ -76,16 +76,16 @@ export const MOCK_CICLO_ATIVO = {
 };
 
 export const MOCK_BLOCOS = [
-  { id: 'b-1', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 1, disciplinaId: MOCK_DISCIPLINAS.Matematica.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Matematica },
-  { id: 'b-2', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 2, disciplinaId: MOCK_DISCIPLINAS.Biologia.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Biologia },
-  { id: 'b-3', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 3, disciplinaId: MOCK_DISCIPLINAS.Redacao.id, tipo: 'redacao' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Redacao },
-  { id: 'b-4', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 4, disciplinaId: MOCK_DISCIPLINAS.Quimica.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Quimica },
-  { id: 'b-5', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 5, disciplinaId: MOCK_DISCIPLINAS.Matematica.id, tipo: 'questoes' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Matematica },
-  { id: 'b-6', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 6, disciplinaId: MOCK_DISCIPLINAS.Fisica.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Fisica },
-  { id: 'b-7', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 7, disciplinaId: MOCK_DISCIPLINAS.Linguagens.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Linguagens },
-  { id: 'b-8', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 8, disciplinaId: MOCK_DISCIPLINAS.Quimica.id, tipo: 'questoes' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Quimica },
-  { id: 'b-9', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 9, disciplinaId: MOCK_DISCIPLINAS.Matematica.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Matematica },
-  { id: 'b-10', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 10, disciplinaId: MOCK_DISCIPLINAS.Biologia.id, tipo: 'questoes' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Biologia },
-  { id: 'b-11', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 11, disciplinaId: MOCK_DISCIPLINAS.Historia.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Historia },
-  { id: 'b-12', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 12, disciplinaId: MOCK_DISCIPLINAS.LinguaEstrangeira.id, tipo: 'lingua_estrangeira' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.LinguaEstrangeira }
+  { id: 'b1b1b1b1-0001-4000-8000-000000000001', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 1, disciplinaId: MOCK_DISCIPLINAS.Matematica.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Matematica },
+  { id: 'b1b1b1b1-0002-4000-8000-000000000002', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 2, disciplinaId: MOCK_DISCIPLINAS.Biologia.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Biologia },
+  { id: 'b1b1b1b1-0003-4000-8000-000000000003', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 3, disciplinaId: MOCK_DISCIPLINAS.Redacao.id, tipo: 'redacao' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Redacao },
+  { id: 'b1b1b1b1-0004-4000-8000-000000000004', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 4, disciplinaId: MOCK_DISCIPLINAS.Quimica.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Quimica },
+  { id: 'b1b1b1b1-0005-4000-8000-000000000005', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 5, disciplinaId: MOCK_DISCIPLINAS.Matematica.id, tipo: 'questoes' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Matematica },
+  { id: 'b1b1b1b1-0006-4000-8000-000000000006', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 6, disciplinaId: MOCK_DISCIPLINAS.Fisica.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Fisica },
+  { id: 'b1b1b1b1-0007-4000-8000-000000000007', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 7, disciplinaId: MOCK_DISCIPLINAS.Linguagens.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Linguagens },
+  { id: 'b1b1b1b1-0008-4000-8000-000000000008', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 8, disciplinaId: MOCK_DISCIPLINAS.Quimica.id, tipo: 'questoes' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Quimica },
+  { id: 'b1b1b1b1-0009-4000-8000-000000000009', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 9, disciplinaId: MOCK_DISCIPLINAS.Matematica.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Matematica },
+  { id: 'b1b1b1b1-0010-4000-8000-000000000010', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 10, disciplinaId: MOCK_DISCIPLINAS.Biologia.id, tipo: 'questoes' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Biologia },
+  { id: 'b1b1b1b1-0011-4000-8000-000000000011', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 11, disciplinaId: MOCK_DISCIPLINAS.Historia.id, tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.Historia },
+  { id: 'b1b1b1b1-0012-4000-8000-000000000012', cicloId: 'c1c1c1c1-1111-1111-1111-111111111111', ordem: 12, disciplinaId: MOCK_DISCIPLINAS.LinguaEstrangeira.id, tipo: 'lingua_estrangeira' as const, estiloAlvo: 'enem' as const, duracaoMin: 50, disciplina: MOCK_DISCIPLINAS.LinguaEstrangeira }
 ];

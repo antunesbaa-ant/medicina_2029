@@ -6,6 +6,14 @@ import { injetarTopicoNoCiclo } from './reestudo';
 import { listarSimulados } from './simulados';
 import { AuthorizationError, requireManagedStudentProfile } from '../../lib/authorization';
 
+const FILA_1_ID = '92000000-0000-4000-8000-000000000001';
+const FILA_INEXISTENTE_ID = '92000000-0000-4000-8000-000000000099';
+const ARQUIVO_1_ID = '60000000-0000-4000-8000-000000000001';
+const TOPICO_1_ID = '31000000-0000-4000-8000-000000000001';
+const ERRO_1_ID = '72000000-0000-4000-8000-000000000001';
+const RESUMO_1_ID = '90000000-0000-4000-8000-000000000001';
+const FC_1_ID = '91000000-0000-4000-8000-000000000001';
+
 const dbState = vi.hoisted(() => ({
   selectResults: [] as unknown[][],
   returningResults: [] as unknown[][],
@@ -26,15 +34,15 @@ vi.mock('../../lib/authorization', () => {
   }
 
   const estudante = {
-    id: 'perfil-1',
-    authUserId: 'auth-1',
+    id: '10000000-0000-4000-8000-000000000001',
+    authUserId: 'a0000000-0000-4000-8000-000000000001',
     nome: 'Estudante Teste',
     email: null,
     papel: 'estudante',
   };
   const responsavel = {
-    id: 'responsavel-1',
-    authUserId: 'auth-responsavel-1',
+    id: '20000000-0000-4000-8000-000000000001',
+    authUserId: 'b0000000-0000-4000-8000-000000000001',
     nome: 'Responsável Teste',
     email: null,
     papel: 'responsavel',
@@ -92,32 +100,69 @@ describe('Fase 3 & 4 - Server Actions Tests', () => {
 
   describe('curarItem', () => {
     it('deve retornar erro para item inexistente', async () => {
-      const res = await curarItem('non-existent', 'aprovado');
+      const res = await curarItem(FILA_INEXISTENTE_ID, 'aprovado');
       expect(res).toMatchObject({ ok: false, code: 'NOT_FOUND' });
+    });
+
+    it('rejeita UUID inválido, decisão inválida ou editado_e_aprovado sem dados sem tocar no banco', async () => {
+      await expect(curarItem('id-invalido', 'aprovado')).resolves.toMatchObject({
+        ok: false,
+        code: 'VALIDATION_ERROR',
+      });
+      await expect(curarItem(FILA_1_ID, 'editado_e_aprovado', {})).resolves.toMatchObject({
+        ok: false,
+        code: 'VALIDATION_ERROR',
+      });
+      await expect(
+        curarItem(FILA_1_ID, 'aprovado', null, 'motivo em aprovacao')
+      ).resolves.toMatchObject({
+        ok: false,
+        code: 'VALIDATION_ERROR',
+      });
+      expect(dbState.transaction).not.toHaveBeenCalled();
+      expect(dbState.update).not.toHaveBeenCalled();
+      expect(dbState.insert).not.toHaveBeenCalled();
+    });
+
+    it('rejeita edição incompatível com o tipo do artefato sem alterar banco', async () => {
+      dbState.selectResults.push([{
+        id: FILA_1_ID,
+        artefatoTipo: 'resumo',
+        artefatoId: RESUMO_1_ID,
+        topicoId: TOPICO_1_ID,
+        decisao: 'pendente',
+      }]);
+
+      const res = await curarItem(FILA_1_ID, 'editado_e_aprovado', {
+        pergunta: 'Pergunta de flashcard em um resumo',
+      });
+      expect(res).toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+      expect(dbState.update).not.toHaveBeenCalled();
     });
 
     it('preserva a negação de autorização ao resolver a estudante vinculada', async () => {
       dbState.selectResults.push([{
-        id: 'fila-1',
+        id: FILA_1_ID,
         artefatoTipo: 'flashcard',
-        artefatoId: 'fc-1',
-        topicoId: 'topico-1',
+        artefatoId: FC_1_ID,
+        topicoId: TOPICO_1_ID,
         decisao: 'pendente',
       }]);
       vi.mocked(requireManagedStudentProfile).mockRejectedValueOnce(new AuthorizationError('FORBIDDEN'));
 
-      await expect(curarItem('fila-1', 'aprovado')).rejects.toMatchObject({ code: 'FORBIDDEN' });
+      await expect(curarItem(FILA_1_ID, 'aprovado')).rejects.toMatchObject({ code: 'FORBIDDEN' });
     });
 
     it('trata repetição da mesma decisão como sucesso idempotente sem nova escrita', async () => {
       dbState.selectResults.push([{
-        id: 'fila-1',
+        id: FILA_1_ID,
         artefatoTipo: 'resumo',
-        artefatoId: 'resumo-1',
+        artefatoId: RESUMO_1_ID,
+        topicoId: TOPICO_1_ID,
         decisao: 'aprovado',
       }]);
 
-      const result = await curarItem('fila-1', 'aprovado');
+      const result = await curarItem(FILA_1_ID, 'aprovado');
 
       expect(result).toMatchObject({ ok: true, data: { decisao: 'aprovado' } });
       expect(dbState.update).not.toHaveBeenCalled();
@@ -126,13 +171,14 @@ describe('Fase 3 & 4 - Server Actions Tests', () => {
 
     it('recusa decisão concorrente diferente sem alterar o artefato', async () => {
       dbState.selectResults.push([{
-        id: 'fila-1',
+        id: FILA_1_ID,
         artefatoTipo: 'resumo',
-        artefatoId: 'resumo-1',
+        artefatoId: RESUMO_1_ID,
+        topicoId: TOPICO_1_ID,
         decisao: 'rejeitado',
       }]);
 
-      const result = await curarItem('fila-1', 'aprovado');
+      const result = await curarItem(FILA_1_ID, 'aprovado');
 
       expect(result).toMatchObject({ ok: false, code: 'CONFLICT' });
       expect(dbState.update).not.toHaveBeenCalled();
@@ -141,14 +187,15 @@ describe('Fase 3 & 4 - Server Actions Tests', () => {
     it('retorna falha transacional quando a fila não confirma a decisão', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
       dbState.selectResults.push([{
-        id: 'fila-1',
+        id: FILA_1_ID,
         artefatoTipo: 'resumo',
-        artefatoId: 'resumo-1',
+        artefatoId: RESUMO_1_ID,
+        topicoId: TOPICO_1_ID,
         decisao: 'pendente',
       }]);
-      dbState.returningResults.push([{ id: 'resumo-1' }], []);
+      dbState.returningResults.push([{ id: RESUMO_1_ID }], []);
 
-      const result = await curarItem('fila-1', 'aprovado');
+      const result = await curarItem(FILA_1_ID, 'aprovado');
 
       expect(result).toMatchObject({ ok: false, code: 'PERSISTENCE_ERROR' });
       expect(dbState.transaction).toHaveBeenCalledOnce();
@@ -157,15 +204,21 @@ describe('Fase 3 & 4 - Server Actions Tests', () => {
   });
 
   describe('geração por IA', () => {
+    it('rejeita arquivoId inválido antes de consultar o banco', async () => {
+      const result = await enfileirarGeracaoDeArtefatos('arquivo-invalido');
+      expect(result).toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+      expect(dbState.transaction).not.toHaveBeenCalled();
+    });
+
     it('retorna o lote existente em repetição sem chamar o provedor', async () => {
       const originalKey = process.env.GEMINI_API_KEY;
       delete process.env.GEMINI_API_KEY;
       dbState.selectResults.push(
-        [{ id: 'arquivo-1', statusProcessamento: 'concluido' }],
+        [{ id: ARQUIVO_1_ID, statusProcessamento: 'concluido' }],
         [{ itensGerados: 7 }]
       );
 
-      const result = await enfileirarGeracaoDeArtefatos('arquivo-1');
+      const result = await enfileirarGeracaoDeArtefatos(ARQUIVO_1_ID);
 
       expect(result).toMatchObject({ ok: true, data: { itensGerados: 7 } });
       expect(dbState.transaction).not.toHaveBeenCalled();
@@ -177,12 +230,12 @@ describe('Fase 3 & 4 - Server Actions Tests', () => {
       const originalKey = process.env.GEMINI_API_KEY;
       delete process.env.GEMINI_API_KEY;
       dbState.selectResults.push(
-        [{ id: 'arquivo-1', statusProcessamento: 'concluido' }],
+        [{ id: ARQUIVO_1_ID, statusProcessamento: 'concluido' }],
         [],
-        [{ texto: 'Conteúdo médico', topicoId: 'topico-1', topicoNome: 'Fisiologia' }]
+        [{ texto: 'Conteúdo médico', topicoId: TOPICO_1_ID, topicoNome: 'Fisiologia' }]
       );
 
-      const result = await enfileirarGeracaoDeArtefatos('arquivo-1');
+      const result = await enfileirarGeracaoDeArtefatos(ARQUIVO_1_ID);
 
       expect(result).toMatchObject({ ok: false, code: 'EXTERNAL_SERVICE_ERROR' });
       expect(result).not.toHaveProperty('data');
@@ -206,14 +259,14 @@ describe('Fase 3 & 4 - Server Actions Tests', () => {
     });
 
     it('deve marcar erro como resolvido', async () => {
-      const res = await resolverErro('mock-erro-id');
+      const res = await resolverErro(ERRO_1_ID);
       expect(res.ok).toBe(true);
     });
   });
 
   describe('Re-estudo', () => {
     it('deve retornar erro ao tentar injetar topico inexistente', async () => {
-      const res = await injetarTopicoNoCiclo('non-existent');
+      const res = await injetarTopicoNoCiclo(TOPICO_1_ID);
       expect(res.sucesso).toBe(false);
     });
   });

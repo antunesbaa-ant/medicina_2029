@@ -4,24 +4,27 @@ import { db } from '../../db';
 import { eq } from 'drizzle-orm';
 import { repertorios } from '../../db/schema';
 
+const PERFIL_1_ID = '10000000-0000-4000-8000-000000000001';
+const GENERO_1_ID = '81000000-0000-4000-8000-000000000001';
+
 vi.mock('../../lib/authorization', () => ({
   requireAuthenticatedProfile: vi.fn().mockResolvedValue({
-    id: 'perfil-1',
-    authUserId: 'auth-1',
+    id: '10000000-0000-4000-8000-000000000001',
+    authUserId: 'a0000000-0000-4000-8000-000000000001',
     nome: 'Estudante Teste',
     email: null,
     papel: 'estudante',
   }),
   requireRole: vi.fn().mockResolvedValue({
-    id: 'perfil-1',
-    authUserId: 'auth-1',
+    id: '10000000-0000-4000-8000-000000000001',
+    authUserId: 'a0000000-0000-4000-8000-000000000001',
     nome: 'Estudante Teste',
     email: null,
     papel: 'estudante',
   }),
   requireManagedStudentProfile: vi.fn().mockResolvedValue({
-    id: 'perfil-1',
-    authUserId: 'auth-1',
+    id: '10000000-0000-4000-8000-000000000001',
+    authUserId: 'a0000000-0000-4000-8000-000000000001',
     nome: 'Estudante Teste',
     email: null,
     papel: 'estudante',
@@ -66,7 +69,7 @@ describe('Fase 7 - Redações & Repertório Sociocultural', () => {
     const list = await obterRepertorios();
     expect(list).toEqual([]);
     const mockedDb = db as unknown as { where: ReturnType<typeof vi.fn> };
-    expect(mockedDb.where).toHaveBeenLastCalledWith(eq(repertorios.perfilId, 'perfil-1'));
+    expect(mockedDb.where).toHaveBeenLastCalledWith(eq(repertorios.perfilId, PERFIL_1_ID));
   });
 
   it('deve obter redacoes da estudante (mock)', async () => {
@@ -84,8 +87,54 @@ describe('Fase 7 - Redações & Repertório Sociocultural', () => {
     expect(res.ok).toBe(true);
     const mockedDb = db as unknown as { values: ReturnType<typeof vi.fn> };
     expect(mockedDb.values).toHaveBeenLastCalledWith(expect.objectContaining({
-      perfilId: 'perfil-1'
+      perfilId: PERFIL_1_ID
     }));
+  });
+
+  it('rejeita redacao com minutos fora dos limites, tema vazio, genero_uece sem generoId ou generoId inexistente sem gravar', async () => {
+    const mockedDb = db as unknown as { insert: ReturnType<typeof vi.fn> };
+
+    await expect(
+      registrarRedacao({
+        formato: 'enem',
+        tema: '',
+        texto: 'Texto',
+        minutosGastos: 50,
+      })
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+
+    await expect(
+      registrarRedacao({
+        formato: 'enem',
+        tema: 'Tema',
+        texto: 'Texto',
+        minutosGastos: 0,
+      })
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+
+    await expect(
+      registrarRedacao({
+        formato: 'genero_uece',
+        tema: 'Tema',
+        texto: 'Texto',
+        minutosGastos: 50,
+      })
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+
+    expect(mockedDb.insert).not.toHaveBeenCalled();
+
+    // genero_uece com generoId válido mas inexistente no banco
+    await expect(
+      registrarRedacao({
+        formato: 'genero_uece',
+        generoId: GENERO_1_ID,
+        tema: 'Tema UECE',
+        texto: 'Texto UECE',
+        minutosGastos: 50,
+      })
+    ).resolves.toMatchObject({ ok: false, code: 'NOT_FOUND' });
+
+    expect(mockedDb.insert).not.toHaveBeenCalled();
   });
 
   it('deve registrar novo repertorio', async () => {
@@ -98,8 +147,32 @@ describe('Fase 7 - Redações & Repertório Sociocultural', () => {
     expect(res.ok).toBe(true);
     const mockedDb = db as unknown as { values: ReturnType<typeof vi.fn> };
     expect(mockedDb.values).toHaveBeenLastCalledWith(expect.objectContaining({
-      perfilId: 'perfil-1'
+      perfilId: PERFIL_1_ID
     }));
+  });
+
+  it('rejeita repertorio incompleto ou com temas duplicados antes de acessar o banco', async () => {
+    const mockedDb = db as unknown as { insert: ReturnType<typeof vi.fn> };
+
+    await expect(
+      registrarRepertorio({
+        referencia: '',
+        resumo2Linhas: 'Resumo',
+        temasAplicaveis: ['Saúde'],
+        categoria: 'Sociologia',
+      })
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+
+    await expect(
+      registrarRepertorio({
+        referencia: 'Autor',
+        resumo2Linhas: 'Resumo',
+        temasAplicaveis: ['Saúde', 'saúde'],
+        categoria: 'Sociologia',
+      })
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+
+    expect(mockedDb.insert).not.toHaveBeenCalled();
   });
 
   it('não confirma redação quando INSERT não retorna registro', async () => {

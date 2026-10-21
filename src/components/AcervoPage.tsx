@@ -1,17 +1,32 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { enviarArquivo, listarArquivosAcervo, obterAcervoStatus, listarDisciplinas } from '../app/actions/acervo';
-import { obterCicloAtivo } from '../app/actions/ciclo';
+import { enviarArquivoFormData, listarArquivosAcervo, obterAcervoStatus, listarDisciplinas } from '../app/actions/acervo';
+
+const MAX_CLIENT_PDF_BYTES = 20 * 1024 * 1024; // 20 MiB
+
+type TipoMaterialAcervo = 'livro' | 'apostila' | 'slide' | 'lista_exercicios' | 'anotacao_aula' | 'prova_oficial' | 'resumo_proprio' | 'outro';
+
+interface ArquivoAcervoItem {
+  id: string;
+  titulo: string;
+  tamanhoBytes: number;
+  paginas?: number | null;
+  statusProcessamento: string;
+}
+
+interface ViewerArquivoDetalhe extends ArquivoAcervoItem {
+  paginasLista?: Array<{ numero: number; textoExtraido: string | null }>;
+}
 
 export default function AcervoPage() {
   const [disciplinas, setDisciplinas] = useState<Array<{ id: string; nome: string }>>([]);
   const [selectedDisciplina, setSelectedDisciplina] = useState<string>('');
   const [titulo, setTitulo] = useState<string>('');
-  const [tipoMaterial, setTipoMaterial] = useState<'livro' | 'apostila' | 'slide' | 'lista_exercicios' | 'anotacao_aula' | 'prova_oficial' | 'resumo_proprio' | 'outro'>('livro');
+  const [tipoMaterial, setTipoMaterial] = useState<TipoMaterialAcervo>('livro');
   const [serieAlvo, setSerieAlvo] = useState<number>(1);
   const [vestibular, setVestibular] = useState<'enem' | 'uece'>('enem');
-  const [arquivos, setArquivos] = useState<any[]>([]);
+  const [arquivos, setArquivos] = useState<ArquivoAcervoItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
   // File Upload State
@@ -22,7 +37,7 @@ export default function AcervoPage() {
 
   // Selected File Viewer
   const [viewerArquivoId, setViewerArquivoId] = useState<string | null>(null);
-  const [viewerData, setViewerData] = useState<any>(null);
+  const [viewerData, setViewerData] = useState<ViewerArquivoDetalhe | null>(null);
   const [viewerLoading, setViewerLoading] = useState<boolean>(false);
   const [viewerPage, setViewerPage] = useState<number>(1);
 
@@ -87,18 +102,26 @@ export default function AcervoPage() {
     setDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const droppedFile = e.dataTransfer.files[0];
-      if (droppedFile.type === 'application/pdf') {
-        setFile(droppedFile);
-        if (!titulo) setTitulo(droppedFile.name.replace(/\.[^/.]+$/, ""));
-      } else {
+      if (droppedFile.type !== 'application/pdf' && !droppedFile.name.toLowerCase().endsWith('.pdf')) {
         setUploadMessage('Erro: Apenas arquivos PDF são aceitos no momento.');
+        return;
       }
+      if (droppedFile.size > MAX_CLIENT_PDF_BYTES) {
+        setUploadMessage('Erro: O arquivo excede o tamanho máximo permitido de 20 MB.');
+        return;
+      }
+      setFile(droppedFile);
+      if (!titulo) setTitulo(droppedFile.name.replace(/\.[^/.]+$/, ""));
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
+      if (selectedFile.size > MAX_CLIENT_PDF_BYTES) {
+        setUploadMessage('Erro: O arquivo excede o tamanho máximo permitido de 20 MB.');
+        return;
+      }
       setFile(selectedFile);
       if (!titulo) setTitulo(selectedFile.name.replace(/\.[^/.]+$/, ""));
     }
@@ -111,42 +134,37 @@ export default function AcervoPage() {
       return;
     }
 
+    if (file.size > MAX_CLIENT_PDF_BYTES) {
+      setUploadMessage('Erro: O arquivo excede o tamanho máximo permitido de 20 MB.');
+      return;
+    }
+
     setUploading(true);
     setUploadMessage('Carregando e preparando arquivo...');
 
     try {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        const base64Data = (reader.result as string).split(',')[1];
-        
-        const res = await enviarArquivo(
-          selectedDisciplina,
-          titulo.trim(),
-          tipoMaterial,
-          serieAlvo,
-          vestibular,
-          file.name,
-          base64Data
-        );
+      const formData = new FormData();
+      formData.set('disciplinaId', selectedDisciplina);
+      formData.set('titulo', titulo.trim());
+      formData.set('tipoMaterial', tipoMaterial);
+      formData.set('serieAlvo', String(serieAlvo));
+      formData.set('vestibular', vestibular);
+      formData.set('file', file);
 
-        if (res.ok) {
-          setUploadMessage(res.data.mensagem);
-          setFile(null);
-          setTitulo('');
-          const files = await listarArquivosAcervo();
-          setArquivos(files);
-        } else {
-          setUploadMessage(`Erro: ${res.message}`);
-        }
-        setUploading(false);
-      };
-      reader.onerror = () => {
-        setUploadMessage('Erro: Não foi possível ler o arquivo selecionado.');
-        setUploading(false);
-      };
-      reader.readAsDataURL(file);
+      const res = await enviarArquivoFormData(formData);
+
+      if (res.ok) {
+        setUploadMessage(res.data.mensagem);
+        setFile(null);
+        setTitulo('');
+        const files = await listarArquivosAcervo();
+        setArquivos(files);
+      } else {
+        setUploadMessage(`Erro: ${res.message}`);
+      }
     } catch {
       setUploadMessage('Erro: Não foi possível concluir o envio. Tente novamente.');
+    } finally {
       setUploading(false);
     }
   };
@@ -214,7 +232,7 @@ export default function AcervoPage() {
                 <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Tipo</label>
                 <select
                   value={tipoMaterial}
-                  onChange={e => setTipoMaterial(e.target.value as any)}
+                  onChange={e => setTipoMaterial(e.target.value as TipoMaterialAcervo)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-xs"
                 >
                   <option value="livro">Livro</option>
@@ -244,7 +262,7 @@ export default function AcervoPage() {
                 <label className="block text-xs font-semibold text-gray-500 uppercase mb-1">Vestibular</label>
                 <select
                   value={vestibular}
-                  onChange={e => setVestibular(e.target.value as any)}
+                  onChange={e => setVestibular(e.target.value as 'enem' | 'uece')}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md bg-white text-xs"
                 >
                   <option value="enem">ENEM</option>
@@ -289,7 +307,7 @@ export default function AcervoPage() {
                 <label htmlFor="file-upload" className="cursor-pointer">
                   <div className="text-gray-400 text-3xl mb-2">📄</div>
                   <p className="text-sm font-medium text-gray-700">Arraste ou clique para enviar</p>
-                  <p className="text-xs text-gray-400 mt-1">Apenas arquivos PDF (Max 200MB)</p>
+                  <p className="text-xs text-gray-400 mt-1">Apenas arquivos PDF (Max 20MB)</p>
                 </label>
               ) : (
                 <div>

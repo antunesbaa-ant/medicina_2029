@@ -4,30 +4,42 @@ import { iniciarSessao, atualizarSessao, concluirSessao } from './sessao';
 import { and, eq } from 'drizzle-orm';
 import { ciclos } from '../../db/schema';
 
+const PERFIL_1_ID = '10000000-0000-4000-8000-000000000001';
+const PERFIL_2_ID = '10000000-0000-4000-8000-000000000002';
+const CICLO_1_ID = '40000000-0000-4000-8000-000000000001';
+const BLOCO_1_ID = '41000000-0000-4000-8000-000000000001';
+const BLOCO_2_ID = '41000000-0000-4000-8000-000000000002';
+const TOPICO_1_ID = '31000000-0000-4000-8000-000000000001';
+const DISCIPLINA_1_ID = '30000000-0000-4000-8000-000000000001';
+const DISCIPLINA_2_ID = '30000000-0000-4000-8000-000000000002';
+const SESSAO_1_ID = '42000000-0000-4000-8000-000000000001';
+const QUESTAO_1_ID = '70000000-0000-4000-8000-000000000001';
+const TENTATIVA_1_ID = '71000000-0000-4000-8000-000000000001';
+
 vi.mock('../../lib/authorization', () => ({
   requireAuthenticatedProfile: vi.fn().mockResolvedValue({
-    id: 'perfil-1',
-    authUserId: 'auth-1',
+    id: '10000000-0000-4000-8000-000000000001',
+    authUserId: 'a0000000-0000-4000-8000-000000000001',
     nome: 'Estudante Teste',
     email: null,
     papel: 'estudante',
   }),
   requireRole: vi.fn().mockResolvedValue({
-    id: 'perfil-1',
-    authUserId: 'auth-1',
+    id: '10000000-0000-4000-8000-000000000001',
+    authUserId: 'a0000000-0000-4000-8000-000000000001',
     nome: 'Estudante Teste',
     email: null,
     papel: 'estudante',
   }),
   requireManagedStudentProfile: vi.fn().mockResolvedValue({
-    id: 'perfil-1',
-    authUserId: 'auth-1',
+    id: '10000000-0000-4000-8000-000000000001',
+    authUserId: 'a0000000-0000-4000-8000-000000000001',
     nome: 'Estudante Teste',
     email: null,
     papel: 'estudante',
   }),
   requireStudentScope: vi.fn().mockResolvedValue({
-    id: 'perfil-1',
+    id: '10000000-0000-4000-8000-000000000001',
     nome: 'Estudante Teste',
     email: null,
     papel: 'estudante',
@@ -161,17 +173,17 @@ describe('Server Actions - Fase 1', () => {
       expect(selectCallsCount).toBe(1);
       expect(whereValues[0]).toEqual(and(
         eq(ciclos.ativo, true),
-        eq(ciclos.estudantePerfilId, 'perfil-1')
+        eq(ciclos.estudantePerfilId, PERFIL_1_ID)
       ));
     });
 
     it('deve retornar o ciclo ativo, blocos ordenados e proxima_ordem', async () => {
-      const cicloMock = { id: 'ciclo-1', nome: 'Ciclo Enem', ativo: true, anoLetivo: 2027, blocosPrevistosSemana: 12 };
+      const cicloMock = { id: CICLO_1_ID, nome: 'Ciclo Enem', ativo: true, anoLetivo: 2027, blocosPrevistosSemana: 12 };
       const blocosMock = [
-        { id: 'bloco-1', cicloId: 'ciclo-1', ordem: 1, disciplinaId: 'd-1', tipo: 'conteudo', estiloAlvo: 'enem', duracaoMin: 50, disciplina: { id: 'd-1', nome: 'Matemática' } },
-        { id: 'bloco-2', cicloId: 'ciclo-1', ordem: 2, disciplinaId: 'd-2', tipo: 'questoes', estiloAlvo: 'enem', duracaoMin: 50, disciplina: { id: 'd-2', nome: 'Biologia' } },
+        { id: BLOCO_1_ID, cicloId: CICLO_1_ID, ordem: 1, disciplinaId: DISCIPLINA_1_ID, tipo: 'conteudo', estiloAlvo: 'enem', duracaoMin: 50, disciplina: { id: DISCIPLINA_1_ID, nome: 'Matemática' } },
+        { id: BLOCO_2_ID, cicloId: CICLO_1_ID, ordem: 2, disciplinaId: DISCIPLINA_2_ID, tipo: 'questoes', estiloAlvo: 'enem', duracaoMin: 50, disciplina: { id: DISCIPLINA_2_ID, nome: 'Biologia' } },
       ];
-      const estadoMock = { cicloId: 'ciclo-1', proximaOrdem: 2 };
+      const estadoMock = { cicloId: CICLO_1_ID, proximaOrdem: 2 };
 
       selectMockedOutputs = [
         [cicloMock],  // 1a chamada: ciclo ativo
@@ -188,7 +200,7 @@ describe('Server Actions - Fase 1', () => {
     });
 
     it('deve usar proximaOrdem = 1 por padrão caso o cicloEstado não esteja definido', async () => {
-      const cicloMock = { id: 'ciclo-1', nome: 'Ciclo Enem', ativo: true, anoLetivo: 2027, blocosPrevistosSemana: 12 };
+      const cicloMock = { id: CICLO_1_ID, nome: 'Ciclo Enem', ativo: true, anoLetivo: 2027, blocosPrevistosSemana: 12 };
       
       selectMockedOutputs = [
         [cicloMock], // 1a chamada: ciclo ativo
@@ -203,7 +215,7 @@ describe('Server Actions - Fase 1', () => {
 
   describe('iniciarCicloEstudos()', () => {
     it('deve desativar ciclos anteriores, criar novo ciclo com 28 blocos e iniciar cicloEstado em 1', async () => {
-      const novoCicloMock = { id: 'novo-ciclo-2027', nome: 'Ciclo Principal - 2027', ativo: true };
+      const novoCicloMock = { id: CICLO_1_ID, nome: 'Ciclo Principal - 2027', ativo: true };
       const disciplinasMock = [
         { id: 'd-mat', nome: 'Matemática', area: 'matematica', corHex: '#C98A2E', ordem: 1 },
         { id: 'd-bio', nome: 'Biologia', area: 'natureza', corHex: '#0E3D4D', ordem: 2 },
@@ -228,11 +240,11 @@ describe('Server Actions - Fase 1', () => {
 
       const res = await iniciarCicloEstudos();
       expect(res.sucesso).toBe(true);
-      expect(res.cicloId).toBe('novo-ciclo-2027');
+      expect(res.cicloId).toBe(CICLO_1_ID);
       expect(insertCallsCount).toBe(30); // 1 para ciclo, 28 para blocos, 1 para cicloEstado
       expect(selectCallsCount).toBe(1); // 1 para disciplinas
       expect(insertedValues[0]).toEqual(expect.objectContaining({
-        estudantePerfilId: 'perfil-1'
+        estudantePerfilId: PERFIL_1_ID
       }));
     });
   });
@@ -247,28 +259,77 @@ describe('Server Actions - Fase 1', () => {
 
   describe('iniciarSessao()', () => {
     it('deve inserir uma nova sessão e retornar seu ID', async () => {
-      const sessaoCriada = { id: 'sessao-123', perfilId: 'perfil-1', cicloBlocoId: 'bloco-1', topicoId: 'topico-1' };
+      const sessaoCriada = { id: SESSAO_1_ID, perfilId: PERFIL_1_ID, cicloBlocoId: BLOCO_1_ID, topicoId: TOPICO_1_ID };
+      selectMockedOutputs = [
+        [], // Nenhuma sessão aberta
+        [{
+          blocoId: BLOCO_1_ID,
+          estudantePerfilId: PERFIL_1_ID,
+          blocoDisciplinaId: DISCIPLINA_1_ID,
+          topicoDisciplinaId: DISCIPLINA_1_ID,
+        }],
+      ];
       insertMockedOutputs = [
         [sessaoCriada],
       ];
 
-      const idSessao = await iniciarSessao('bloco-1', 'topico-1');
-      expect(idSessao).toBe('sessao-123');
+      const idSessao = await iniciarSessao(BLOCO_1_ID, TOPICO_1_ID);
+      expect(idSessao).toBe(SESSAO_1_ID);
       expect(insertCallsCount).toBe(1);
     });
 
     it('não confirma início quando INSERT não retorna sessão', async () => {
+      selectMockedOutputs = [
+        [],
+        [{
+          blocoId: BLOCO_1_ID,
+          estudantePerfilId: PERFIL_1_ID,
+          blocoDisciplinaId: DISCIPLINA_1_ID,
+          topicoDisciplinaId: DISCIPLINA_1_ID,
+        }],
+      ];
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-      await expect(iniciarSessao('bloco-1', 'topico-1')).rejects.toMatchObject({
+      await expect(iniciarSessao(BLOCO_1_ID, TOPICO_1_ID)).rejects.toMatchObject({
         code: 'PERSISTENCE_ERROR',
       });
       consoleError.mockRestore();
     });
 
     it('reutiliza sessão aberta em retry sem novo INSERT', async () => {
-      selectMockedOutputs = [[{ id: 'sessao-aberta' }]];
+      selectMockedOutputs = [[{ id: SESSAO_1_ID }]];
 
-      await expect(iniciarSessao('bloco-1', 'topico-1')).resolves.toBe('sessao-aberta');
+      await expect(iniciarSessao(BLOCO_1_ID, TOPICO_1_ID)).resolves.toBe(SESSAO_1_ID);
+      expect(insertCallsCount).toBe(0);
+    });
+
+    it('rejeita UUID inválido antes de acessar o banco', async () => {
+      await expect(iniciarSessao('bloco-invalido', TOPICO_1_ID)).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+      });
+      expect(selectCallsCount).toBe(0);
+      expect(insertCallsCount).toBe(0);
+    });
+
+    it('rejeita bloco inexistente, de outro perfil ou com tópico de outra disciplina sem inserir', async () => {
+      selectMockedOutputs = [[], []];
+      await expect(iniciarSessao(BLOCO_1_ID, TOPICO_1_ID)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
+      expect(insertCallsCount).toBe(0);
+
+      selectCallsCount = 0;
+      selectMockedOutputs = [
+        [],
+        [{
+          blocoId: BLOCO_1_ID,
+          estudantePerfilId: PERFIL_2_ID,
+          blocoDisciplinaId: DISCIPLINA_1_ID,
+          topicoDisciplinaId: DISCIPLINA_1_ID,
+        }],
+      ];
+      await expect(iniciarSessao(BLOCO_1_ID, TOPICO_1_ID)).rejects.toMatchObject({
+        code: 'NOT_FOUND',
+      });
       expect(insertCallsCount).toBe(0);
     });
   });
@@ -276,10 +337,10 @@ describe('Server Actions - Fase 1', () => {
   describe('atualizarSessao()', () => {
     it('deve atualizar a sessão e retornar os dados atualizados', async () => {
       const sessaoAtualizada = {
-        id: 'sessao-123',
-        perfilId: 'perfil-1',
-        cicloBlocoId: 'bloco-1',
-        topicoId: 'topico-1',
+        id: SESSAO_1_ID,
+        perfilId: PERFIL_1_ID,
+        cicloBlocoId: BLOCO_1_ID,
+        topicoId: TOPICO_1_ID,
         etapaAtingida: 'questoes',
         segundosEfetivos: 1200,
         segundosPausa: 100,
@@ -289,7 +350,7 @@ describe('Server Actions - Fase 1', () => {
         [sessaoAtualizada],
       ];
 
-      const res = await atualizarSessao('sessao-123', {
+      const res = await atualizarSessao(SESSAO_1_ID, {
         etapaAtingida: 'questoes',
         segundosEfetivos: 1200,
         segundosPausa: 100,
@@ -303,26 +364,56 @@ describe('Server Actions - Fase 1', () => {
 
     it('diferencia UPDATE sem linha de falha de persistência genérica', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-      await expect(atualizarSessao('sessao-inexistente', { etapaAtingida: 'conteudo' })).rejects.toMatchObject({
+      await expect(atualizarSessao(SESSAO_1_ID, { etapaAtingida: 'conteudo' })).rejects.toMatchObject({
         code: 'NOT_FOUND',
       });
       consoleError.mockRestore();
+    });
+
+    it('rejeita UUID inválido, payload vazio ou valores fora dos limites sem escrever', async () => {
+      await expect(atualizarSessao('id-invalido', { etapaAtingida: 'conteudo' })).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+      });
+      await expect(atualizarSessao(SESSAO_1_ID, {})).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+      });
+      await expect(atualizarSessao(SESSAO_1_ID, { segundosEfetivos: -10 })).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+      });
+      expect(updateCallsCount).toBe(0);
     });
   });
 
   describe('concluirSessao()', () => {
     it('trata repetição de sessão já encerrada como idempotente', async () => {
       const sessaoEncerrada = {
-        id: 'sessao-123', perfilId: 'perfil-1', cicloBlocoId: 'bloco-1',
-        topicoId: 'topico-1', encerradaEm: new Date(), concluida: true,
+        id: SESSAO_1_ID, perfilId: PERFIL_1_ID, cicloBlocoId: BLOCO_1_ID,
+        topicoId: TOPICO_1_ID, encerradaEm: new Date(), concluida: true, etapaAtingida: 'registro',
       };
       selectMockedOutputs = [[{
         sessao: sessaoEncerrada,
-        bloco: { id: 'bloco-1', cicloId: 'ciclo-1', ordem: 1 },
+        bloco: { id: BLOCO_1_ID, cicloId: CICLO_1_ID, ordem: 1 },
       }]];
 
-      await expect(concluirSessao('sessao-123', { etapaAtingida: 'registro' }))
+      await expect(concluirSessao(SESSAO_1_ID, { etapaAtingida: 'registro' }))
         .resolves.toEqual(sessaoEncerrada);
+      expect(updateCallsCount).toBe(0);
+      expect(insertCallsCount).toBe(0);
+    });
+
+    it('rejeita repetição de sessão encerrada com etapa conflitante', async () => {
+      const sessaoEncerrada = {
+        id: SESSAO_1_ID, perfilId: PERFIL_1_ID, cicloBlocoId: BLOCO_1_ID,
+        topicoId: TOPICO_1_ID, encerradaEm: new Date(), concluida: false, etapaAtingida: 'questoes',
+      };
+      selectMockedOutputs = [[{
+        sessao: sessaoEncerrada,
+        bloco: { id: BLOCO_1_ID, cicloId: CICLO_1_ID, ordem: 1 },
+      }]];
+
+      await expect(concluirSessao(SESSAO_1_ID, { etapaAtingida: 'registro' })).rejects.toMatchObject({
+        code: 'CONFLICT',
+      });
       expect(updateCallsCount).toBe(0);
       expect(insertCallsCount).toBe(0);
     });
@@ -330,18 +421,18 @@ describe('Server Actions - Fase 1', () => {
     it('não prossegue nem confirma quando UPDATE não retorna sessão', async () => {
       selectMockedOutputs = [[{
         sessao: {
-          id: 'sessao-123',
-          perfilId: 'perfil-1',
-          cicloBlocoId: 'bloco-1',
-          topicoId: 'topico-1',
+          id: SESSAO_1_ID,
+          perfilId: PERFIL_1_ID,
+          cicloBlocoId: BLOCO_1_ID,
+          topicoId: TOPICO_1_ID,
           segundosEfetivos: 0,
           segundosPausa: 0,
         },
-        bloco: { id: 'bloco-1', cicloId: 'ciclo-1', ordem: 1 },
+        bloco: { id: BLOCO_1_ID, cicloId: CICLO_1_ID, ordem: 1 },
       }]];
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-      await expect(concluirSessao('sessao-123', { etapaAtingida: 'registro' })).rejects.toMatchObject({
+      await expect(concluirSessao(SESSAO_1_ID, { etapaAtingida: 'registro' })).rejects.toMatchObject({
         code: 'PERSISTENCE_ERROR',
       });
       expect(insertCallsCount).toBe(0);
@@ -349,25 +440,24 @@ describe('Server Actions - Fase 1', () => {
     });
 
     it('deve concluir como "false" se a etapa atingida for menor que "registro"', async () => {
-      // Massa de dados
-      const sessaoMock = { id: 'sessao-123', perfilId: 'perfil-1', cicloBlocoId: 'bloco-1', topicoId: 'topico-1', segundosEfetivos: 0, segundosPausa: 0 };
-      const blocoMock = { id: 'bloco-1', cicloId: 'ciclo-1', ordem: 1 };
+      const sessaoMock = { id: SESSAO_1_ID, perfilId: PERFIL_1_ID, cicloBlocoId: BLOCO_1_ID, topicoId: TOPICO_1_ID, segundosEfetivos: 0, segundosPausa: 0 };
+      const blocoMock = { id: BLOCO_1_ID, cicloId: CICLO_1_ID, ordem: 1 };
       
       selectMockedOutputs = [
-        [{ sessao: sessaoMock, bloco: blocoMock }], // 1a chamada: dados da sessao + bloco
+        [{ sessao: sessaoMock, bloco: blocoMock }],
       ];
 
       const sessaoConcluidaMock = {
-        id: 'sessao-123',
-        concluida: false, // Menor que 'registro'
+        id: SESSAO_1_ID,
+        concluida: false,
         etapaAtingida: 'questoes',
       };
 
       updateMockedOutputs = [
-        [sessaoConcluidaMock], // Atualização da sessão
+        [sessaoConcluidaMock],
       ];
 
-      const res = await concluirSessao('sessao-123', {
+      const res = await concluirSessao(SESSAO_1_ID, {
         etapaAtingida: 'questoes',
         segundosEfetivos: 1800,
         segundosPausa: 50,
@@ -379,49 +469,16 @@ describe('Server Actions - Fase 1', () => {
     });
 
     it('deve concluir como "true" se a etapa atingida for "registro"', async () => {
-      const sessaoMock = { id: 'sessao-123', perfilId: 'perfil-1', cicloBlocoId: 'bloco-1', topicoId: 'topico-1', segundosEfetivos: 0, segundosPausa: 0 };
-      const blocoMock = { id: 'bloco-1', cicloId: 'ciclo-1', ordem: 1 };
+      const sessaoMock = { id: SESSAO_1_ID, perfilId: PERFIL_1_ID, cicloBlocoId: BLOCO_1_ID, topicoId: TOPICO_1_ID, segundosEfetivos: 0, segundosPausa: 0 };
+      const blocoMock = { id: BLOCO_1_ID, cicloId: CICLO_1_ID, ordem: 1 };
 
       selectMockedOutputs = [
-        [{ sessao: sessaoMock, bloco: blocoMock }], // 1a chamada: dados da sessao + bloco
-        [{ id: 'bloco-1' }, { id: 'bloco-2' }],     // 2a chamada: blocos do ciclo (total = 2)
+        [{ sessao: sessaoMock, bloco: blocoMock }],
+        [{ id: BLOCO_1_ID }, { id: BLOCO_2_ID }],
       ];
 
       const sessaoConcluidaMock = {
-        id: 'sessao-123',
-        concluida: true, // Atingiu 'registro'
-        etapaAtingida: 'registro',
-      };
-
-      updateMockedOutputs = [
-        [sessaoConcluidaMock],
-      ];
-
-      insertMockedOutputs = [
-        [{ cicloId: 'ciclo-1' }], // Upsert cicloEstado
-      ];
-
-      const res = await concluirSessao('sessao-123', {
-        etapaAtingida: 'registro',
-        segundosEfetivos: 3000,
-      });
-
-      expect(res.concluida).toBe(true);
-    });
-
-    it('deve registrar erros na tabela correspondente', async () => {
-      const sessaoMock = { id: 'sessao-123', perfilId: 'perfil-1', cicloBlocoId: 'bloco-1', topicoId: 'topico-1', segundosEfetivos: 0, segundosPausa: 0 };
-      const blocoMock = { id: 'bloco-1', cicloId: 'ciclo-1', ordem: 1 };
-      const questaoMock = { id: 'q-1', disciplinaId: 'd-1', estilo: 'enem' };
-
-      selectMockedOutputs = [
-        [{ sessao: sessaoMock, bloco: blocoMock }], // 1a chamada concluirSessao: sessao + bloco
-        [questaoMock],                              // 2a chamada concluirSessao (dentro do loop de erro): busca questao
-        [{ id: 'bloco-1' }, { id: 'bloco-2' }],     // 3a chamada concluirSessao: blocos do ciclo (total = 2)
-      ];
-
-      const sessaoConcluidaMock = {
-        id: 'sessao-123',
+        id: SESSAO_1_ID,
         concluida: true,
         etapaAtingida: 'registro',
       };
@@ -431,16 +488,50 @@ describe('Server Actions - Fase 1', () => {
       ];
 
       insertMockedOutputs = [
-        [{ id: 'erro-1' }], // 1o insert: tabela erros
-        [{ cicloId: 'ciclo-1' }], // 2o insert: upsert cicloEstado
+        [{ cicloId: CICLO_1_ID }],
       ];
 
-      const res = await concluirSessao('sessao-123', {
+      const res = await concluirSessao(SESSAO_1_ID, {
+        etapaAtingida: 'registro',
+        segundosEfetivos: 3000,
+      });
+
+      expect(res.concluida).toBe(true);
+    });
+
+    it('deve registrar erros na tabela correspondente', async () => {
+      const sessaoMock = { id: SESSAO_1_ID, perfilId: PERFIL_1_ID, cicloBlocoId: BLOCO_1_ID, topicoId: TOPICO_1_ID, segundosEfetivos: 0, segundosPausa: 0 };
+      const blocoMock = { id: BLOCO_1_ID, cicloId: CICLO_1_ID, ordem: 1, disciplinaId: DISCIPLINA_1_ID };
+      const questaoMock = { id: QUESTAO_1_ID, disciplinaId: DISCIPLINA_1_ID, estilo: 'enem' };
+
+      selectMockedOutputs = [
+        [{ sessao: sessaoMock, bloco: blocoMock }],
+        [questaoMock],
+        [{ id: TENTATIVA_1_ID, perfilId: PERFIL_1_ID, sessaoId: SESSAO_1_ID, questaoId: QUESTAO_1_ID, correta: false }],
+        [{ id: BLOCO_1_ID }, { id: BLOCO_2_ID }],
+      ];
+
+      const sessaoConcluidaMock = {
+        id: SESSAO_1_ID,
+        concluida: true,
+        etapaAtingida: 'registro',
+      };
+
+      updateMockedOutputs = [
+        [sessaoConcluidaMock],
+      ];
+
+      insertMockedOutputs = [
+        [{ id: '72000000-0000-4000-8000-000000000001' }],
+        [{ cicloId: CICLO_1_ID }],
+      ];
+
+      const res = await concluirSessao(SESSAO_1_ID, {
         etapaAtingida: 'registro',
         errosParaRegistrar: [
           {
-            questaoId: 'q-1',
-            tentativaId: 't-1',
+            questaoId: QUESTAO_1_ID,
+            tentativaId: TENTATIVA_1_ID,
             tipoErro: 'conteudo',
             descricaoLivre: 'Esqueci a fórmula',
             conceitoCorreto: 'F = m.a',
@@ -449,50 +540,68 @@ describe('Server Actions - Fase 1', () => {
       });
 
       expect(res.concluida).toBe(true);
-      expect(insertCallsCount).toBe(2); // 1 para erros e 1 para cicloEstado
+      expect(insertCallsCount).toBe(2);
     });
 
     it('aborta antes do ponteiro quando o erro derivado não é confirmado', async () => {
       const sessaoMock = {
-        id: 'sessao-123', perfilId: 'perfil-1', cicloBlocoId: 'bloco-1',
-        topicoId: 'topico-1', segundosEfetivos: 0, segundosPausa: 0,
+        id: SESSAO_1_ID, perfilId: PERFIL_1_ID, cicloBlocoId: BLOCO_1_ID,
+        topicoId: TOPICO_1_ID, segundosEfetivos: 0, segundosPausa: 0,
       };
       selectMockedOutputs = [
-        [{ sessao: sessaoMock, bloco: { id: 'bloco-1', cicloId: 'ciclo-1', ordem: 1 } }],
-        [{ disciplinaId: 'd-1', estilo: 'enem' }],
-        [{ id: 'tentativa-1' }],
+        [{ sessao: sessaoMock, bloco: { id: BLOCO_1_ID, cicloId: CICLO_1_ID, ordem: 1, disciplinaId: DISCIPLINA_1_ID } }],
+        [{ disciplinaId: DISCIPLINA_1_ID, estilo: 'enem' }],
+        [{ id: TENTATIVA_1_ID }],
       ];
       updateMockedOutputs = [[{ ...sessaoMock, concluida: true }]];
       insertMockedOutputs = [[]];
 
-      await expect(concluirSessao('sessao-123', {
+      await expect(concluirSessao(SESSAO_1_ID, {
         etapaAtingida: 'registro',
-        errosParaRegistrar: [{ questaoId: 'q-1', tentativaId: 'tentativa-1', tipoErro: 'conteudo' }],
+        errosParaRegistrar: [{ questaoId: QUESTAO_1_ID, tentativaId: TENTATIVA_1_ID, tipoErro: 'conteudo' }],
       })).rejects.toMatchObject({ code: 'PERSISTENCE_ERROR' });
       expect(insertCallsCount).toBe(1);
     });
 
+    it('rejeita erro cuja questão pertence a outra disciplina ou tentativa correta sem escrever', async () => {
+      const sessaoMock = {
+        id: SESSAO_1_ID, perfilId: PERFIL_1_ID, cicloBlocoId: BLOCO_1_ID,
+        topicoId: TOPICO_1_ID, segundosEfetivos: 0, segundosPausa: 0,
+      };
+      selectMockedOutputs = [
+        [{ sessao: sessaoMock, bloco: { id: BLOCO_1_ID, cicloId: CICLO_1_ID, ordem: 1, disciplinaId: DISCIPLINA_1_ID } }],
+        [{ disciplinaId: DISCIPLINA_2_ID, estilo: 'enem' }],
+        [{ id: TENTATIVA_1_ID, perfilId: PERFIL_1_ID, sessaoId: SESSAO_1_ID, questaoId: QUESTAO_1_ID, correta: false }],
+      ];
+
+      await expect(concluirSessao(SESSAO_1_ID, {
+        etapaAtingida: 'registro',
+        errosParaRegistrar: [{ questaoId: QUESTAO_1_ID, tentativaId: TENTATIVA_1_ID, tipoErro: 'conteudo' }],
+      })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+      expect(updateCallsCount).toBe(0);
+      expect(insertCallsCount).toBe(0);
+    });
+
     it('deve avançar o ponteiro proximaOrdem no ciclo e resetar para 1 ao passar do limite', async () => {
-      const sessaoMock = { id: 'sessao-123', perfilId: 'perfil-1', cicloBlocoId: 'bloco-2', topicoId: 'topico-1', segundosEfetivos: 0, segundosPausa: 0 };
-      // Bloco atual é ordem 2 de um total de 2 blocos. ProximaOrdem deve resetar para 1.
-      const blocoMock = { id: 'bloco-2', cicloId: 'ciclo-1', ordem: 2 };
+      const sessaoMock = { id: SESSAO_1_ID, perfilId: PERFIL_1_ID, cicloBlocoId: BLOCO_2_ID, topicoId: TOPICO_1_ID, segundosEfetivos: 0, segundosPausa: 0 };
+      const blocoMock = { id: BLOCO_2_ID, cicloId: CICLO_1_ID, ordem: 2 };
 
       selectMockedOutputs = [
         [{ sessao: sessaoMock, bloco: blocoMock }],
-        [{ id: 'bloco-1' }, { id: 'bloco-2' }],
+        [{ id: BLOCO_1_ID }, { id: BLOCO_2_ID }],
       ];
 
-      const sessaoConcluidaMock = { id: 'sessao-123', concluida: true, etapaAtingida: 'registro' };
+      const sessaoConcluidaMock = { id: SESSAO_1_ID, concluida: true, etapaAtingida: 'registro' };
 
       updateMockedOutputs = [
         [sessaoConcluidaMock],
       ];
 
       insertMockedOutputs = [
-        [{ cicloId: 'ciclo-1' }], // Upsert do cicloEstado
+        [{ cicloId: CICLO_1_ID }],
       ];
 
-      const res = await concluirSessao('sessao-123', {
+      const res = await concluirSessao(SESSAO_1_ID, {
         etapaAtingida: 'registro',
       });
 

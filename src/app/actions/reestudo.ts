@@ -4,6 +4,7 @@ import { db } from '../../db';
 import { cicloBlocos, cicloEstado, ciclos, topicos } from '../../db/schema';
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { requireRole } from '../../lib/authorization';
+import { injetarTopicoInputSchema } from '../../lib/validation';
 
 // 1. Injetar Re-estudo de um tópico crítico como o próximo bloco do ciclo
 export async function injetarTopicoNoCiclo(
@@ -11,6 +12,12 @@ export async function injetarTopicoNoCiclo(
   duracaoMin: number = 50
 ): Promise<{ sucesso: boolean; mensagem: string }> {
   const estudante = await requireRole('estudante');
+
+  const validacao = injetarTopicoInputSchema.safeParse({ topicoId, duracaoMin });
+  if (!validacao.ok) {
+    return { sucesso: false, mensagem: validacao.message };
+  }
+  const { topicoId: topicoIdValido, duracaoMin: duracaoValida } = validacao.data;
 
   try {
     return await db.transaction(async (tx) => {
@@ -21,7 +28,7 @@ export async function injetarTopicoNoCiclo(
           nome: topicos.nome
         })
         .from(topicos)
-        .where(eq(topicos.id, topicoId))
+        .where(eq(topicos.id, topicoIdValido))
         .limit(1);
 
       if (!topico) {
@@ -81,7 +88,7 @@ export async function injetarTopicoNoCiclo(
         disciplinaId: topico.disciplinaId,
         tipo: 'conteudo',
         estiloAlvo: 'enem',
-        duracaoMin
+        duracaoMin: duracaoValida
       });
 
       return {

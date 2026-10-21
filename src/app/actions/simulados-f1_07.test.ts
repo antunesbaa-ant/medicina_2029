@@ -9,31 +9,34 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../lib/authorization', () => ({
-  requireRole: vi.fn().mockResolvedValue({ id: 'perfil-1', papel: 'estudante' }),
+  requireRole: vi.fn().mockResolvedValue({
+    id: '10000000-0000-4000-8000-000000000001',
+    papel: 'estudante',
+  }),
 }));
 
 vi.mock('../../db', () => ({
   db: (() => {
     const database = {
       execute: vi.fn().mockResolvedValue([]),
-    select: vi.fn(() => {
-      const query = {
-        from: vi.fn().mockReturnThis(),
-        leftJoin: vi.fn().mockReturnThis(),
-        where: vi.fn().mockReturnThis(),
-        orderBy: vi.fn().mockReturnThis(),
-        limit: vi.fn().mockReturnThis(),
-        then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(mocks.selectResults.shift() ?? []).then(resolve),
-      };
-      return query;
-    }),
-    insert: mocks.insert.mockImplementation(() => {
-      const query = {
-        values: vi.fn().mockReturnThis(),
-        returning: vi.fn(async () => mocks.insertResults.shift() ?? []),
-      };
-      return query;
-    }),
+      select: vi.fn(() => {
+        const query = {
+          from: vi.fn().mockReturnThis(),
+          leftJoin: vi.fn().mockReturnThis(),
+          where: vi.fn().mockReturnThis(),
+          orderBy: vi.fn().mockReturnThis(),
+          limit: vi.fn().mockReturnThis(),
+          then: (resolve: (value: unknown[]) => unknown) => Promise.resolve(mocks.selectResults.shift() ?? []).then(resolve),
+        };
+        return query;
+      }),
+      insert: mocks.insert.mockImplementation(() => {
+        const query = {
+          values: vi.fn().mockReturnThis(),
+          returning: vi.fn(async () => mocks.insertResults.shift() ?? []),
+        };
+        return query;
+      }),
       transaction: mocks.transaction,
     };
     mocks.transaction.mockImplementation(async (callback) => callback(database));
@@ -51,7 +54,7 @@ const entrada = {
   areas: [{ area: 'Natureza', acertos: 30, total: 45 }],
 };
 
-describe('F1.07 - contrato de simulados', () => {
+describe('F1.07 / F1.09 - contrato e validação de simulados', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.selectResults = [[]];
@@ -84,6 +87,41 @@ describe('F1.07 - contrato de simulados', () => {
   it('rejeita totais inválidos antes de qualquer escrita', async () => {
     const result = await registrarSimulado({ ...entrada, areas: [{ area: 'Natureza', acertos: 1, total: 0 }] });
     expect(result).toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+    expect(mocks.transaction).not.toHaveBeenCalled();
+    expect(mocks.insert).not.toHaveBeenCalled();
+  });
+
+  it('rejeita data inválida, duração fora dos limites, áreas vazias, áreas duplicadas ou perfilId do cliente sem tocar no banco', async () => {
+    await expect(
+      registrarSimulado({ ...entrada, data: 'data-invalida' })
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+
+    await expect(
+      registrarSimulado({ ...entrada, duracaoMin: 0 })
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+
+    await expect(
+      registrarSimulado({ ...entrada, areas: [] })
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+
+    await expect(
+      registrarSimulado({
+        ...entrada,
+        areas: [
+          { area: 'Natureza', acertos: 20, total: 45 },
+          { area: 'natureza', acertos: 25, total: 45 },
+        ],
+      })
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+
+    await expect(
+      registrarSimulado({
+        ...entrada,
+        perfilId: '10000000-0000-4000-8000-000000000002',
+      } as unknown as typeof entrada)
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+
+    expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.insert).not.toHaveBeenCalled();
   });
 

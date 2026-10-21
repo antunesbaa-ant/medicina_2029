@@ -1,11 +1,31 @@
 'use server';
 
 import { db } from '../../db';
-import { acervoArquivos, acervoPaginas, acervoChunks, disciplinas } from '../../db/schema';
+import { acervoArquivos, acervoPaginas, disciplinas } from '../../db/schema';
 import { and, eq } from 'drizzle-orm';
-import { extrairTextoPDF, segmentarTexto, classificarTópicoChunk } from '../../lib/ingestion';
 import crypto from 'crypto';
-import { uploadToSupabaseStorage } from '../../lib/supabaseStorage';
+import {
+  DEFAULT_SIGNED_URL_SECONDS,
+  MAX_SIGNED_URL_SECONDS,
+  MIN_SIGNED_URL_SECONDS,
+  StorageOperationError,
+  obterUrlAssinadaSupabase,
+  uploadToSupabaseStorage,
+} from '../../lib/supabaseStorage';
+import {
+  buildDeterministicAcervoStoragePath,
+  reconciliarSnapshotsAcervo,
+  type ObjetoStorageSnapshot,
+  type RelatorioReconciliacaoAcervo,
+} from '../../lib/acervoReconciliacao';
+import {
+  acervoJobs,
+  enfileirarJobIngestaoAcervo,
+  reenfileirarJobAcervoDoResponsavel,
+  type EtapaJobAcervo,
+  type JobAcervoSnapshot,
+  type StatusJobAcervo,
+} from '../../lib/acervoPipelineWorker';
 import { requireAuthenticatedProfile, requireRole } from '../../lib/authorization';
 import {
   logOperationalFailure,
@@ -13,34 +33,89 @@ import {
   operationSuccess,
   type OperationResult,
 } from '../../lib/operation-result';
+import { enviarArquivoInputSchema, v } from '../../lib/validation';
 
 export interface UploadConfirmado {
   arquivoId: string;
   uploadStatus: 'concluido';
   processamentoStatus: 'aguardando';
   mensagem: string;
+  reconciliacao?: 'novo_upload' | 'objeto_existente_adotado';
 }
 
-// 1. Enviar e Processar Arquivo (Pipeline completo)
+export interface UrlAssinadaAcervoConfirmada {
+  arquivoId: string;
+  signedUrl: string;
+  expiraEmSegundos: number;
+}
+
+export interface JobAcervoConfirmado {
+  jobId: string;
+  arquivoId: string;
+  status: StatusJobAcervo;
+  etapaAtual: EtapaJobAcervo;
+}
+
+type TipoMaterialAcervo =
+  | 'livro'
+  | 'apostila'
+  | 'slide'
+  | 'lista_exercicios'
+  | 'anotacao_aula'
+  | 'prova_oficial'
+  | 'resumo_proprio'
+  | 'outro';
+
+function isPostgresUniqueViolation(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const pgErr = error as { code?: string; message?: string };
+  return pgErr.code === '23505' || /duplicate key value violates unique constraint/i.test(pgErr.message ?? '');
+}
+
+// 1. Enviar Arquivo e Enfileirar Job Durável (sem Promise solta / sem fallback efêmero)
 export async function enviarArquivo(
   disciplinaId: string,
   titulo: string,
-  tipoMaterial: 'livro' | 'apostila' | 'slide' | 'lista_exercicios' | 'anotacao_aula' | 'prova_oficial' | 'resumo_proprio' | 'outro',
+  tipoMaterial: TipoMaterialAcervo,
   serieAlvo: number,
   vestibular: string,
   nomeArquivo: string,
-  base64Data: string // Recebe em base64 para facilitar trânsito
+  base64DataOuBinario: string | Buffer | Uint8Array | ArrayBuffer
 ): Promise<OperationResult<UploadConfirmado>> {
   const perfil = await requireRole('responsavel');
 
+  const uploadPayload =
+    typeof base64DataOuBinario === 'string'
+      ? { nomeArquivo, base64Data: base64DataOuBinario }
+      : { nomeArquivo, fileData: base64DataOuBinario };
+
+  const validacao = enviarArquivoInputSchema.safeParse({
+    disciplinaId,
+    titulo,
+    tipoMaterial,
+    serieAlvo,
+    vestibular,
+    upload: uploadPayload,
+  });
+  if (!validacao.ok) {
+    return operationFailure('VALIDATION_ERROR', validacao.message);
+  }
+
+  const {
+    disciplinaId: disciplinaIdValida,
+    titulo: tituloValido,
+    tipoMaterial: tipoMaterialValido,
+    serieAlvo: serieAlvoValida,
+    vestibular: vestibularValido,
+    upload: { fileBuffer },
+  } = validacao.data;
+
   try {
-    const fileBuffer = Buffer.from(base64Data, 'base64');
-    if (fileBuffer.length === 0) {
-      return operationFailure('VALIDATION_ERROR', 'O arquivo enviado está vazio ou inválido.');
-    }
     const hash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
 
-    // Verificar se já existe um arquivo com esse hash (Deduplicação)
+    // Verificar se já existe um arquivo com esse hash no banco (Deduplicação sem tocar objetos existentes)
     const arquivosExistentes = await db
       .select({ id: acervoArquivos.id })
       .from(acervoArquivos)
@@ -51,16 +126,40 @@ export async function enviarArquivo(
       return operationFailure('CONFLICT', 'Este arquivo já foi enviado anteriormente.');
     }
 
-    const filePath = `acervo/${hash}_${nomeArquivo}`;
+    // Chave canônica e determinística baseada exclusivamente no hash SHA-256 do conteúdo validado
+    const filePath = buildDeterministicAcervoStoragePath(hash);
+    let reutilizouObjetoExistente = false;
 
     try {
-      await uploadToSupabaseStorage(filePath, fileBuffer, 'application/pdf');
-    } catch {
-      logOperationalFailure('acervo.upload.storage', 'external_service');
-      return operationFailure(
-        'EXTERNAL_SERVICE_ERROR',
-        'Não foi possível armazenar o arquivo. Nenhum processamento foi iniciado.'
-      );
+      const storagePath = await uploadToSupabaseStorage(filePath, fileBuffer, 'application/pdf', {
+        upsert: false,
+      });
+      if (!storagePath || typeof storagePath !== 'string') {
+        logOperationalFailure('acervo.upload.storage_invalid_response', 'external_service');
+        return operationFailure(
+          'EXTERNAL_SERVICE_ERROR',
+          'Resposta inválida do serviço de armazenamento. Nenhum processamento foi iniciado.'
+        );
+      }
+    } catch (error) {
+      if (error instanceof StorageOperationError && error.code === 'OBJECT_EXISTS') {
+        // O objeto com o mesmo SHA-256 já existe no Storage, mas não havia registro correspondente
+        // no banco (ex.: tentativa anterior cujo upload concluiu e o INSERT falhou).
+        // Adota o objeto determinístico existente sem sobrescrevê-lo nem apagá-lo.
+        reutilizouObjetoExistente = true;
+      } else if (error instanceof StorageOperationError && error.code === 'INVALID_RESPONSE') {
+        logOperationalFailure('acervo.upload.storage_invalid_response', 'external_service');
+        return operationFailure(
+          'EXTERNAL_SERVICE_ERROR',
+          'Resposta inválida do serviço de armazenamento. Nenhum processamento foi iniciado.'
+        );
+      } else {
+        logOperationalFailure('acervo.upload.storage', 'external_service');
+        return operationFailure(
+          'EXTERNAL_SERVICE_ERROR',
+          'Não foi possível armazenar o arquivo. Nenhum processamento foi iniciado.'
+        );
+      }
     }
 
     let novoArquivo: { id: string } | undefined;
@@ -68,20 +167,23 @@ export async function enviarArquivo(
       [novoArquivo] = await db
         .insert(acervoArquivos)
         .values({
-          disciplinaId,
-          titulo,
-          tipoMaterial,
-          serieAlvo,
-          vestibular,
+          disciplinaId: disciplinaIdValida,
+          titulo: tituloValido,
+          tipoMaterial: tipoMaterialValido,
+          serieAlvo: serieAlvoValida,
+          vestibular: vestibularValido,
           filePath,
           mime: 'application/pdf',
           tamanhoBytes: fileBuffer.length,
           enviadoPor: perfil.id,
           statusProcessamento: 'aguardando',
-          hashConteudo: hash
+          hashConteudo: hash,
         })
         .returning({ id: acervoArquivos.id });
-    } catch {
+    } catch (insertError) {
+      if (isPostgresUniqueViolation(insertError)) {
+        return operationFailure('CONFLICT', 'Este arquivo já foi enviado anteriormente.');
+      }
       logOperationalFailure('acervo.upload.metadata', 'persistence');
       return operationFailure(
         'PERSISTENCE_ERROR',
@@ -89,7 +191,7 @@ export async function enviarArquivo(
       );
     }
 
-    if (!novoArquivo) {
+    if (!novoArquivo || !novoArquivo.id) {
       logOperationalFailure('acervo.upload.metadata_missing', 'persistence');
       return operationFailure(
         'PERSISTENCE_ERROR',
@@ -97,16 +199,38 @@ export async function enviarArquivo(
       );
     }
 
-    // Execução efêmera preservada até a F1.11; o retorno confirma somente upload e metadados.
-    void processarArquivoPipeline(novoArquivo.id, fileBuffer).catch(() => {
-      logOperationalFailure('acervo.pipeline.unhandled', 'internal');
-    });
+    // F1.11: Registra o job persistente na fila PostgreSQL (`public.acervo_jobs`).
+    // Proíbe fallback silencioso para execução efêmera em memória caso a fila falhe.
+    try {
+      await enfileirarJobIngestaoAcervo(novoArquivo.id, perfil.id);
+    } catch {
+      logOperationalFailure('acervo.upload.queue', 'persistence');
+      try {
+        await db
+          .update(acervoArquivos)
+          .set({
+            statusProcessamento: 'falhou',
+            erroProcessamento:
+              'Arquivo cadastrado, mas o registro do job durável na fila falhou. Solicite a retomada no acervo.',
+          })
+          .where(eq(acervoArquivos.id, novoArquivo.id));
+      } catch {
+        logOperationalFailure('acervo.upload.queue_failure_status', 'persistence');
+      }
+      return operationFailure(
+        'PERSISTENCE_ERROR',
+        'O arquivo foi armazenado e cadastrado, mas não foi possível enfileirar o job durável de processamento. Utilize a retomada no acervo.'
+      );
+    }
 
     return operationSuccess({
       arquivoId: novoArquivo.id,
       uploadStatus: 'concluido',
       processamentoStatus: 'aguardando',
-      mensagem: 'Upload confirmado. O processamento está pendente e pode ser acompanhado no acervo.',
+      mensagem: reutilizouObjetoExistente
+        ? 'Upload confirmado (objeto pré-existente reconciliado). O processamento está pendente e pode ser acompanhado no acervo.'
+        : 'Upload confirmado. O processamento está pendente e pode ser acompanhado no acervo.',
+      ...(reutilizouObjetoExistente ? { reconciliacao: 'objeto_existente_adotado' as const } : {}),
     });
   } catch {
     logOperationalFailure('acervo.upload', 'persistence');
@@ -114,116 +238,129 @@ export async function enviarArquivo(
   }
 }
 
-// 2. Execução Sequencial do Pipeline de Ingestão
-async function processarArquivoPipeline(arquivoId: string, fileBuffer: Buffer) {
+// 1.1 Transporte binário via FormData (evita inflação de ~33% do base64 na Server Action)
+export async function enviarArquivoFormData(
+  formData: FormData
+): Promise<OperationResult<UploadConfirmado>> {
+  await requireRole('responsavel');
+
+  if (!(formData instanceof FormData)) {
+    return operationFailure('VALIDATION_ERROR', 'Formulário de upload inválido.');
+  }
+
+  const disciplinaId = String(formData.get('disciplinaId') ?? '');
+  const titulo = String(formData.get('titulo') ?? '');
+  const tipoMaterial = String(formData.get('tipoMaterial') ?? '') as TipoMaterialAcervo;
+  const serieAlvoRaw = Number(formData.get('serieAlvo'));
+  const vestibular = String(formData.get('vestibular') ?? '');
+  const arquivo = formData.get('file');
+
+  if (!arquivo || typeof (arquivo as File).arrayBuffer !== 'function') {
+    return operationFailure('VALIDATION_ERROR', 'Arquivo PDF é obrigatório para o envio.');
+  }
+
+  const fileObj = arquivo as File;
+  const arrayBuffer = await fileObj.arrayBuffer();
+  const fileBuffer = Buffer.from(new Uint8Array(arrayBuffer));
+
+  return enviarArquivo(
+    disciplinaId,
+    titulo,
+    tipoMaterial,
+    serieAlvoRaw,
+    vestibular,
+    fileObj.name || 'documento.pdf',
+    fileBuffer
+  );
+}
+
+// 2. Consultar job durável do arquivo (restrito ao responsável proprietário)
+export async function obterStatusJobAcervo(
+  arquivoId: string
+): Promise<OperationResult<JobAcervoSnapshot>> {
+  const perfil = await requireRole('responsavel');
+  const idCheck = v.uuid('ID do arquivo').safeParse(arquivoId);
+  if (!idCheck.ok) {
+    return operationFailure('VALIDATION_ERROR', idCheck.message);
+  }
+
   try {
-    // Passo 1: Extraindo
-    const [extraindo] = await db
-      .update(acervoArquivos)
-      .set({ statusProcessamento: 'extraindo' })
-      .where(eq(acervoArquivos.id, arquivoId))
-      .returning({ id: acervoArquivos.id });
-    if (!extraindo) throw new Error('status_update_not_confirmed');
-
-    const paginas = await extrairTextoPDF(fileBuffer);
-
-    // Salvar páginas
-    for (const p of paginas) {
-      await db.insert(acervoPaginas).values({
-        arquivoId,
-        numero: p.numero,
-        textoExtraido: p.texto,
-        metodoExtracao: p.metodo,
-        confiancaOcr: p.confianca
-      });
-    }
-
-    // Passo 2: Segmentando
-    const [segmentando] = await db
-      .update(acervoArquivos)
-      .set({ 
-        statusProcessamento: 'segmentando',
-        paginas: paginas.length 
-      })
-      .where(eq(acervoArquivos.id, arquivoId))
-      .returning({ id: acervoArquivos.id });
-    if (!segmentando) throw new Error('status_update_not_confirmed');
-
-    const chunks = segmentarTexto(paginas);
-
-    // Passo 3: Classificando e Indexando
-    // Buscamos o arquivo para obter a disciplinaId
-    const [arquivo] = await db
-      .select({ disciplinaId: acervoArquivos.disciplinaId })
-      .from(acervoArquivos)
-      .where(eq(acervoArquivos.id, arquivoId))
+    const [job] = await db
+      .select()
+      .from(acervoJobs)
+      .where(and(eq(acervoJobs.arquivoId, idCheck.data), eq(acervoJobs.enviadoPor, perfil.id)))
       .limit(1);
 
-    if (!arquivo) throw new Error('source_file_not_found');
+    if (!job || job.enviadoPor !== perfil.id) {
+      return operationFailure('NOT_FOUND', 'Job ou arquivo não encontrado ou acesso não autorizado.');
+    }
 
-    const [classificando] = await db
-      .update(acervoArquivos)
-      .set({ statusProcessamento: 'classificando' })
-      .where(eq(acervoArquivos.id, arquivoId))
-      .returning({ id: acervoArquivos.id });
-    if (!classificando) throw new Error('status_update_not_confirmed');
+    return operationSuccess(job as JobAcervoSnapshot);
+  } catch {
+    logOperationalFailure('acervo.job.status', 'persistence');
+    return operationFailure('PERSISTENCE_ERROR', 'Não foi possível consultar o status do job do arquivo.');
+  }
+}
 
-    for (const chunk of chunks) {
-      // Classificação
-      const { topicoId, confianca } = await classificarTópicoChunk(chunk.texto, arquivo.disciplinaId);
+// 2.1 Retomar/reenfileirar processamento durável do arquivo a partir da última etapa confirmada
+export async function retomarProcessamentoArquivoAcervo(
+  arquivoId: string
+): Promise<OperationResult<JobAcervoConfirmado>> {
+  const perfil = await requireRole('responsavel');
+  const idCheck = v.uuid('ID do arquivo').safeParse(arquivoId);
+  if (!idCheck.ok) {
+    return operationFailure('VALIDATION_ERROR', idCheck.message);
+  }
 
-      await db.insert(acervoChunks).values({
-        arquivoId,
-        paginaInicial: chunk.paginaInicial,
-        paginaFinal: chunk.paginaFinal,
-        ordem: chunk.ordem,
-        texto: chunk.texto,
-        tipoConteudo: chunk.tipoConteudo,
-        topicoId,
-        confiancaClassificacao: confianca,
-        // Embeddings fictícios não são persistidos como índices reais.
-        embedding: null,
-        tokens: chunk.tokens
+  try {
+    const [arquivo] = await db
+      .select({
+        id: acervoArquivos.id,
+        enviadoPor: acervoArquivos.enviadoPor,
+      })
+      .from(acervoArquivos)
+      .where(and(eq(acervoArquivos.id, idCheck.data), eq(acervoArquivos.enviadoPor, perfil.id)))
+      .limit(1);
+
+    if (!arquivo || arquivo.enviadoPor !== perfil.id) {
+      return operationFailure('NOT_FOUND', 'Arquivo não encontrado ou acesso não autorizado.');
+    }
+
+    const reagendado = await reenfileirarJobAcervoDoResponsavel(arquivo.id, perfil.id);
+    if (reagendado) {
+      return operationSuccess({
+        jobId: reagendado.id,
+        arquivoId: reagendado.arquivoId,
+        status: reagendado.status,
+        etapaAtual: reagendado.etapaAtual,
       });
     }
 
-    const [indexando] = await db
-      .update(acervoArquivos)
-      .set({ statusProcessamento: 'indexando' })
-      .where(eq(acervoArquivos.id, arquivoId))
-      .returning({ id: acervoArquivos.id });
-    if (!indexando) throw new Error('status_update_not_confirmed');
-
-    // Não existe provedor real de embeddings neste estágio. Concluir seria falso sucesso.
-    throw new Error('embedding_provider_not_configured');
-
+    const criado = await enfileirarJobIngestaoAcervo(arquivo.id, perfil.id);
+    return operationSuccess({
+      jobId: criado.id,
+      arquivoId: arquivo.id,
+      status: criado.status,
+      etapaAtual: criado.etapaAtual,
+    });
   } catch {
-    logOperationalFailure('acervo.pipeline', 'persistence');
-    try {
-      await db
-        .update(acervoArquivos)
-        .set({
-          statusProcessamento: 'falhou',
-          erroProcessamento: 'O processamento não foi concluído. Tente novamente quando o serviço estiver disponível.'
-        })
-        .where(eq(acervoArquivos.id, arquivoId));
-    } catch {
-      logOperationalFailure('acervo.pipeline.failure_status', 'persistence');
-    }
+    logOperationalFailure('acervo.job.resume', 'persistence');
+    return operationFailure(
+      'PERSISTENCE_ERROR',
+      'Não foi possível reenfileirar o job de processamento deste arquivo.'
+    );
   }
 }
 
 // 3. Obter status do arquivo
 export async function obterAcervoStatus(arquivoId: string) {
   const perfil = await requireRole('responsavel');
+  const arquivoIdValido = v.uuid('ID do arquivo').parse(arquivoId);
 
   const [arquivo] = await db
     .select()
     .from(acervoArquivos)
-    .where(and(
-      eq(acervoArquivos.id, arquivoId),
-      eq(acervoArquivos.enviadoPor, perfil.id)
-    ))
+    .where(and(eq(acervoArquivos.id, arquivoIdValido), eq(acervoArquivos.enviadoPor, perfil.id)))
     .limit(1);
 
   if (!arquivo) return null;
@@ -231,30 +368,133 @@ export async function obterAcervoStatus(arquivoId: string) {
   const paginasDb = await db
     .select({ numero: acervoPaginas.numero, textoExtraido: acervoPaginas.textoExtraido })
     .from(acervoPaginas)
-    .where(eq(acervoPaginas.arquivoId, arquivoId))
+    .where(eq(acervoPaginas.arquivoId, arquivoIdValido))
     .orderBy(acervoPaginas.numero);
 
   return {
     ...arquivo,
-    paginasLista: paginasDb
+    paginasLista: paginasDb,
   };
 }
 
-// 4. Listar arquivos do acervo
+// 4. Gerar URL assinada temporária para leitura privada de documento do acervo
+export async function obterUrlLeituraArquivoAcervo(
+  arquivoId: string,
+  expiracaoSegundos = DEFAULT_SIGNED_URL_SECONDS
+): Promise<OperationResult<UrlAssinadaAcervoConfirmada>> {
+  const perfil = await requireRole('responsavel');
+
+  const idCheck = v.uuid('ID do arquivo').safeParse(arquivoId);
+  if (!idCheck.ok) {
+    return operationFailure('VALIDATION_ERROR', idCheck.message);
+  }
+
+  const expCheck = v
+    .number({
+      label: 'Tempo de expiração',
+      integer: true,
+      min: MIN_SIGNED_URL_SECONDS,
+      max: MAX_SIGNED_URL_SECONDS,
+    })
+    .safeParse(expiracaoSegundos);
+  if (!expCheck.ok) {
+    return operationFailure('VALIDATION_ERROR', expCheck.message);
+  }
+
+  try {
+    const [arquivo] = await db
+      .select({
+        id: acervoArquivos.id,
+        filePath: acervoArquivos.filePath,
+        enviadoPor: acervoArquivos.enviadoPor,
+      })
+      .from(acervoArquivos)
+      .where(and(eq(acervoArquivos.id, idCheck.data), eq(acervoArquivos.enviadoPor, perfil.id)))
+      .limit(1);
+
+    if (!arquivo || arquivo.enviadoPor !== perfil.id) {
+      return operationFailure('NOT_FOUND', 'Arquivo não encontrado ou acesso não autorizado.');
+    }
+
+    try {
+      const signedUrl = await obterUrlAssinadaSupabase(arquivo.filePath, expCheck.data);
+      return operationSuccess({
+        arquivoId: arquivo.id,
+        signedUrl,
+        expiraEmSegundos: expCheck.data,
+      });
+    } catch {
+      logOperationalFailure('acervo.signed_url.storage', 'external_service');
+      return operationFailure(
+        'EXTERNAL_SERVICE_ERROR',
+        'Não foi possível gerar o link temporário de leitura para este arquivo.'
+      );
+    }
+  } catch {
+    logOperationalFailure('acervo.signed_url.persistence', 'persistence');
+    return operationFailure('PERSISTENCE_ERROR', 'Falha ao consultar metadados do arquivo.');
+  }
+}
+
+// 5. Diagnóstico read-only de reconciliação Banco <-> Storage (sem exclusão automática)
+export async function diagnosticarReconciliacaoAcervo(
+  objetosStorageSnapshot: readonly ObjetoStorageSnapshot[]
+): Promise<OperationResult<RelatorioReconciliacaoAcervo>> {
+  const perfil = await requireRole('responsavel');
+
+  if (!Array.isArray(objetosStorageSnapshot) || objetosStorageSnapshot.length > 5000) {
+    return operationFailure(
+      'VALIDATION_ERROR',
+      'Snapshot de objetos do Storage inválido ou excede o limite de inspeção.'
+    );
+  }
+
+  try {
+    const registros = await db
+      .select({
+        id: acervoArquivos.id,
+        filePath: acervoArquivos.filePath,
+        hashConteudo: acervoArquivos.hashConteudo,
+        tamanhoBytes: acervoArquivos.tamanhoBytes,
+        mime: acervoArquivos.mime,
+        statusProcessamento: acervoArquivos.statusProcessamento,
+        erroProcessamento: acervoArquivos.erroProcessamento,
+        enviadoPor: acervoArquivos.enviadoPor,
+        enviadoEm: acervoArquivos.enviadoEm,
+      })
+      .from(acervoArquivos)
+      .where(eq(acervoArquivos.enviadoPor, perfil.id));
+
+    const relatorio = reconciliarSnapshotsAcervo(registros, objetosStorageSnapshot);
+    return operationSuccess(relatorio);
+  } catch {
+    logOperationalFailure('acervo.reconciliation', 'persistence');
+    return operationFailure(
+      'PERSISTENCE_ERROR',
+      'Não foi possível gerar o diagnóstico de reconciliação do acervo.'
+    );
+  }
+}
+
+// 6. Listar arquivos do acervo
 export async function listarArquivosAcervo(disciplinaId?: string) {
   const perfil = await requireRole('responsavel');
+  const disciplinaIdValida =
+    disciplinaId !== undefined ? v.uuid('ID da disciplina').parse(disciplinaId) : undefined;
 
   return await db
     .select()
     .from(acervoArquivos)
-    .where(and(
-      eq(acervoArquivos.enviadoPor, perfil.id),
-      disciplinaId ? eq(acervoArquivos.disciplinaId, disciplinaId) : undefined
-    ))
+    .where(
+      and(
+        eq(acervoArquivos.enviadoPor, perfil.id),
+        disciplinaIdValida ? eq(acervoArquivos.disciplinaId, disciplinaIdValida) : undefined
+      )
+    )
     .orderBy(acervoArquivos.enviadoEm);
 }
 
-// 5. Obter todas as disciplinas
+// 7. Obter todas as disciplinas
 export async function listarDisciplinas() {
   await requireAuthenticatedProfile();
 

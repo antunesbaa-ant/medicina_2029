@@ -11,6 +11,7 @@ import {
   logOperationalFailure,
   type OperationErrorCode,
 } from '../../lib/operation-result';
+import { registrarRevisaoCardInputSchema } from '../../lib/validation';
 
 // 1. Obter Cards Due (Vencidos) do Estudante
 export async function obterCardsParaRevisao() {
@@ -69,6 +70,22 @@ export async function registrarRevisaoCard(
 ): Promise<ResultadoRevisaoCard> {
   const perfil = await requireRole('estudante');
 
+  const validacao = registrarRevisaoCardInputSchema.safeParse({
+    cardId,
+    ratingStr,
+    duracaoMs,
+  });
+  if (!validacao.ok) {
+    return {
+      sucesso: false,
+      code: 'VALIDATION_ERROR',
+      mensagem: validacao.message,
+    };
+  }
+
+  const { cardId: cardIdValido, ratingStr: ratingValido, duracaoMs: duracaoValida } =
+    validacao.data;
+
   try {
     return await db.transaction(async (tx) => {
       // O lock impede que duas abas calculem o próximo estado a partir da
@@ -76,15 +93,23 @@ export async function registrarRevisaoCard(
       const [cardDb] = await tx
         .select()
         .from(cards)
-        .where(and(eq(cards.id, cardId), eq(cards.perfilId, perfil.id)))
+        .where(and(eq(cards.id, cardIdValido), eq(cards.perfilId, perfil.id)))
         .limit(1)
         .for('update');
 
-      if (!cardDb) {
+      if (!cardDb || (cardDb.perfilId && cardDb.perfilId !== perfil.id)) {
         return {
           sucesso: false,
           code: 'NOT_FOUND',
           mensagem: 'Registro não encontrado ou acesso não permitido.',
+        };
+      }
+
+      if (cardDb.suspenso === true || (cardDb.status && cardDb.status !== 'aprovado')) {
+        return {
+          sucesso: false,
+          code: 'CONFLICT',
+          mensagem: 'Este card não está elegível para revisão.',
         };
       }
 
@@ -101,12 +126,12 @@ export async function registrarRevisaoCard(
             rating: cardRevisoes.rating,
           })
           .from(cardRevisoes)
-          .where(eq(cardRevisoes.cardId, cardId))
+          .where(eq(cardRevisoes.cardId, cardIdValido))
           .orderBy(desc(cardRevisoes.revisadoEm))
           .limit(1);
 
         const mesmaRevisao = ultimaRevisao
-          && ultimaRevisao.rating === ratingStr
+          && ultimaRevisao.rating === ratingValido
           && new Date(ultimaRevisao.revisadoEm).getTime() === new Date(cardDb.lastReview).getTime();
 
         if (mesmaRevisao) {
@@ -140,7 +165,7 @@ export async function registrarRevisaoCard(
 
       // C. Instancia e calcula novos parâmetros
       const f = new FSRS({});
-      const ratingVal = obterRatingFSRS(ratingStr) as
+      const ratingVal = obterRatingFSRS(ratingValido) as
         | Rating.Again
         | Rating.Hard
         | Rating.Good
@@ -170,7 +195,7 @@ export async function registrarRevisaoCard(
           due: result.card.due,
           lastReview: now,
         })
-        .where(and(eq(cards.id, cardId), eq(cards.perfilId, perfil.id)))
+        .where(and(eq(cards.id, cardIdValido), eq(cards.perfilId, perfil.id)))
         .returning({ id: cards.id });
 
       if (!cardAtualizado) {
@@ -181,12 +206,12 @@ export async function registrarRevisaoCard(
       const [revisaoInserida] = await tx
         .insert(cardRevisoes)
         .values({
-          cardId,
+          cardId: cardIdValido,
           revisadoEm: now,
-          rating: ratingStr,
+          rating: ratingValido,
           stateAnterior: cardDb.state,
           stabilityAnterior: cardDb.stability,
-          duracaoMs,
+          duracaoMs: duracaoValida,
         })
         .returning({ id: cardRevisoes.id });
 

@@ -75,9 +75,24 @@ describe('F1.07 - falhas operacionais nas fronteiras públicas', () => {
     expect(mocks.insert).not.toHaveBeenCalled();
   });
 
-  it('diferencia UPDATE sem linha de uma atualização confirmada', async () => {
-    await expect(resolverErro('inexistente')).resolves.toMatchObject({ ok: false, code: 'NOT_FOUND' });
-    mocks.returningResult = [{ id: 'erro-1' }];
-    await expect(resolverErro('erro-1')).resolves.toEqual({ ok: true, data: { erroId: 'erro-1' } });
+  it('diferencia UPDATE sem linha de uma atualização confirmada e valida UUID (F1.09)', async () => {
+    const ERRO_INEXISTENTE_ID = 'aaaaaaaa-1111-4111-8111-111111111111';
+    const ERRO_1_ID = 'bbbbbbbb-1111-4111-8111-111111111111';
+    await expect(resolverErro('inexistente')).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+    expect(mocks.update).not.toHaveBeenCalled();
+
+    await expect(resolverErro(ERRO_INEXISTENTE_ID)).resolves.toMatchObject({ ok: false, code: 'NOT_FOUND' });
+    mocks.returningResult = [{ id: ERRO_1_ID }];
+    await expect(resolverErro(ERRO_1_ID)).resolves.toEqual({ ok: true, data: { erroId: ERRO_1_ID } });
+  });
+
+  it('rejeita check-in com limites numéricos inválidos sem escrita (F1.09)', async () => {
+    await expect(
+      registrarCheckin({ horasSono: 30, exercicioMin: 20, humor: 4, energia: 4 })
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+    await expect(
+      registrarCheckin({ horasSono: 8, exercicioMin: 20, humor: 6, energia: 4 })
+    ).resolves.toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+    expect(mocks.insert).not.toHaveBeenCalled();
   });
 });

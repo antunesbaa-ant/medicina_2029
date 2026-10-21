@@ -11,6 +11,7 @@ import {
   operationSuccess,
   type OperationResult,
 } from '../../lib/operation-result';
+import { tipoErroSchema, v } from '../../lib/validation';
 
 export interface FiltrosCadernoErros {
   disciplinaId?: string;
@@ -18,21 +19,30 @@ export interface FiltrosCadernoErros {
   resolvido?: boolean;
 }
 
+const filtrosCadernoSchema = v.optional(
+  v.object({
+    disciplinaId: v.optional(v.uuid('ID da disciplina')),
+    tipoErro: v.optional(tipoErroSchema),
+    resolvido: v.optional(v.boolean('Filtro resolvido')),
+  })
+);
+
 // 1. Obter Erros do Caderno
 export async function obterCadernoErros(filtros?: FiltrosCadernoErros) {
   const perfil = await requireRole('estudante');
+  const filtrosValidos = filtrosCadernoSchema.parse(filtros);
 
   try {
     const conditions = [eq(erros.perfilId, perfil.id)];
 
-    if (filtros?.disciplinaId) {
-      conditions.push(eq(erros.disciplinaId, filtros.disciplinaId));
+    if (filtrosValidos?.disciplinaId) {
+      conditions.push(eq(erros.disciplinaId, filtrosValidos.disciplinaId));
     }
-    if (filtros?.tipoErro) {
-      conditions.push(eq(erros.tipoErro, filtros.tipoErro));
+    if (filtrosValidos?.tipoErro) {
+      conditions.push(eq(erros.tipoErro, filtrosValidos.tipoErro));
     }
-    if (filtros?.resolvido !== undefined) {
-      if (filtros.resolvido) {
+    if (filtrosValidos?.resolvido !== undefined) {
+      if (filtrosValidos.resolvido) {
         conditions.push(isNotNull(erros.resolvidoEm));
       } else {
         conditions.push(isNull(erros.resolvidoEm));
@@ -61,7 +71,8 @@ export async function obterCadernoErros(filtros?: FiltrosCadernoErros) {
       .orderBy(sql`${erros.resolvidoEm} is not null`, erros.criadoEm);
 
     return list;
-  } catch {
+  } catch (error) {
+    if (error instanceof PublicOperationError) throw error;
     logOperationalFailure('caderno_erros.list', 'persistence');
     throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível carregar o caderno de erros.');
   }
@@ -73,11 +84,16 @@ export async function resolverErro(
 ): Promise<OperationResult<{ erroId: string }>> {
   const perfil = await requireRole('estudante');
 
+  const validacao = v.uuid('ID do erro').safeParse(erroId);
+  if (!validacao.ok) {
+    return operationFailure('VALIDATION_ERROR', validacao.message);
+  }
+
   try {
     const [erroAtualizado] = await db
       .update(erros)
       .set({ resolvidoEm: new Date() })
-      .where(and(eq(erros.id, erroId), eq(erros.perfilId, perfil.id)))
+      .where(and(eq(erros.id, validacao.data), eq(erros.perfilId, perfil.id)))
       .returning({ id: erros.id });
 
     if (!erroAtualizado) {

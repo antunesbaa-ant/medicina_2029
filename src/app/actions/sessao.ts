@@ -1,17 +1,32 @@
 'use server';
 
 import { db } from '../../db';
-import { sessoes, cicloBlocos, cicloEstado, erros, questoes, tentativas } from '../../db/schema';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import {
+  sessoes,
+  ciclos,
+  cicloBlocos,
+  cicloEstado,
+  erros,
+  questoes,
+  tentativas,
+  topicos,
+} from '../../db/schema';
+import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { validarConclusaoSessao, calcularProximaOrdem } from '../../lib/studysystem';
 import { requireRole } from '../../lib/authorization';
 import { PublicOperationError, logOperationalFailure } from '../../lib/operation-result';
+import {
+  iniciarSessaoInputSchema,
+  atualizarSessaoInputSchema,
+  concluirSessaoInputSchema,
+} from '../../lib/validation';
 
 export async function iniciarSessao(
   cicloBlocoId: string,
   topicoId: string
 ): Promise<string> {
   const perfil = await requireRole('estudante');
+  const validado = iniciarSessaoInputSchema.parse({ cicloBlocoId, topicoId });
 
   try {
     return await db.transaction(async (tx) => {
@@ -19,7 +34,7 @@ export async function iniciarSessao(
       // linha para bloquear, evitando duas sessões abertas para o mesmo bloco.
       await tx.execute(sql`
         SELECT pg_advisory_xact_lock(
-          hashtextextended(concat_ws(':', ${perfil.id}::text, ${cicloBlocoId}::text, ${topicoId}::text), 0)
+          hashtextextended(concat_ws(':', ${perfil.id}::text, ${validado.cicloBlocoId}::text, ${validado.topicoId}::text), 0)
         );
       `);
 
@@ -28,20 +43,55 @@ export async function iniciarSessao(
         .from(sessoes)
         .where(and(
           eq(sessoes.perfilId, perfil.id),
-          eq(sessoes.cicloBlocoId, cicloBlocoId),
-          eq(sessoes.topicoId, topicoId),
+          eq(sessoes.cicloBlocoId, validado.cicloBlocoId),
+          eq(sessoes.topicoId, validado.topicoId),
           isNull(sessoes.encerradaEm)
         ))
         .limit(1);
 
       if (sessaoAberta) return sessaoAberta.id;
 
+      // Integridade relacional: verifica que o bloco pertence a ciclo do perfil
+      // autorizado (compatível com expansão F1.03-R) e que o tópico é da mesma disciplina.
+      const [vinculoBlocoTopico] = await tx
+        .select({
+          blocoId: cicloBlocos.id,
+          estudantePerfilId: ciclos.estudantePerfilId,
+          blocoDisciplinaId: cicloBlocos.disciplinaId,
+          topicoDisciplinaId: topicos.disciplinaId,
+        })
+        .from(cicloBlocos)
+        .innerJoin(ciclos, eq(cicloBlocos.cicloId, ciclos.id))
+        .innerJoin(topicos, eq(topicos.id, validado.topicoId))
+        .where(
+          and(
+            eq(cicloBlocos.id, validado.cicloBlocoId),
+            eq(cicloBlocos.disciplinaId, topicos.disciplinaId),
+            or(eq(ciclos.estudantePerfilId, perfil.id), isNull(ciclos.estudantePerfilId))
+          )
+        )
+        .limit(1);
+
+      if (
+        !vinculoBlocoTopico ||
+        (vinculoBlocoTopico.estudantePerfilId &&
+          vinculoBlocoTopico.estudantePerfilId !== perfil.id) ||
+        (vinculoBlocoTopico.blocoDisciplinaId &&
+          vinculoBlocoTopico.topicoDisciplinaId &&
+          vinculoBlocoTopico.blocoDisciplinaId !== vinculoBlocoTopico.topicoDisciplinaId)
+      ) {
+        throw new PublicOperationError(
+          'NOT_FOUND',
+          'Bloco do ciclo ou tópico não encontrado ou acesso não permitido.'
+        );
+      }
+
       const [sessaoInserida] = await tx
         .insert(sessoes)
         .values({
           perfilId: perfil.id,
-          cicloBlocoId,
-          topicoId,
+          cicloBlocoId: validado.cicloBlocoId,
+          topicoId: validado.topicoId,
           iniciadaEm: new Date(),
           segundosEfetivos: 0,
           segundosPausa: 0,
@@ -76,17 +126,25 @@ export async function atualizarSessao(
   dados: DadosAtualizacaoSessao
 ): Promise<typeof sessoes.$inferSelect> {
   const perfil = await requireRole('estudante');
+  const { sessaoId: sessaoIdValido, dados: dadosValidos } = atualizarSessaoInputSchema.parse({
+    sessaoId,
+    dados,
+  });
 
   try {
     const [sessaoAtualizada] = await db
       .update(sessoes)
       .set({
-        ...(dados.etapaAtingida && { etapaAtingida: dados.etapaAtingida }),
-        ...(dados.segundosEfetivos !== undefined && { segundosEfetivos: dados.segundosEfetivos }),
-        ...(dados.segundosPausa !== undefined && { segundosPausa: dados.segundosPausa }),
-        ...(dados.notaLivre !== undefined && { notaLivre: dados.notaLivre }),
+        ...(dadosValidos.etapaAtingida && { etapaAtingida: dadosValidos.etapaAtingida }),
+        ...(dadosValidos.segundosEfetivos !== undefined && { segundosEfetivos: dadosValidos.segundosEfetivos }),
+        ...(dadosValidos.segundosPausa !== undefined && { segundosPausa: dadosValidos.segundosPausa }),
+        ...(dadosValidos.notaLivre !== undefined && { notaLivre: dadosValidos.notaLivre }),
       })
-      .where(and(eq(sessoes.id, sessaoId), eq(sessoes.perfilId, perfil.id)))
+      .where(and(
+        eq(sessoes.id, sessaoIdValido),
+        eq(sessoes.perfilId, perfil.id),
+        isNull(sessoes.encerradaEm)
+      ))
       .returning();
 
     if (!sessaoAtualizada) {
@@ -123,6 +181,8 @@ export async function concluirSessao(
   dadosFinalizacao: DadosFinalizacaoSessao
 ): Promise<typeof sessoes.$inferSelect> {
   const perfil = await requireRole('estudante');
+  const { sessaoId: sessaoIdValido, dadosFinalizacao: finalizacaoValida } =
+    concluirSessaoInputSchema.parse({ sessaoId, dadosFinalizacao });
 
   try {
     return await db.transaction(async (tx) => {
@@ -132,27 +192,57 @@ export async function concluirSessao(
         .select({
           sessao: sessoes,
           bloco: cicloBlocos,
+          ciclo: ciclos,
         })
         .from(sessoes)
-        .where(and(eq(sessoes.id, sessaoId), eq(sessoes.perfilId, perfil.id)))
+        .where(
+          and(
+            eq(sessoes.id, sessaoIdValido),
+            eq(sessoes.perfilId, perfil.id),
+            or(eq(ciclos.estudantePerfilId, perfil.id), isNull(ciclos.estudantePerfilId))
+          )
+        )
         .innerJoin(cicloBlocos, eq(sessoes.cicloBlocoId, cicloBlocos.id))
+        .innerJoin(ciclos, eq(cicloBlocos.cicloId, ciclos.id))
         .limit(1)
         .for('update');
 
-      if (!dadosSessao) {
+      if (
+        !dadosSessao ||
+        (dadosSessao.sessao.perfilId && dadosSessao.sessao.perfilId !== perfil.id) ||
+        (dadosSessao.ciclo?.estudantePerfilId &&
+          dadosSessao.ciclo.estudantePerfilId !== perfil.id)
+      ) {
         throw new PublicOperationError('NOT_FOUND', 'Sessão não encontrada ou acesso não permitido.');
       }
 
       const { sessao, bloco } = dadosSessao;
       if (sessao.encerradaEm) {
+        if (sessao.etapaAtingida && sessao.etapaAtingida !== finalizacaoValida.etapaAtingida) {
+          throw new PublicOperationError(
+            'CONFLICT',
+            'Esta sessão já foi encerrada com estado divergente.'
+          );
+        }
         return sessao;
       }
 
+      if (
+        finalizacaoValida.encerradaEm &&
+        sessao.iniciadaEm &&
+        finalizacaoValida.encerradaEm.getTime() < new Date(sessao.iniciadaEm).getTime()
+      ) {
+        throw new PublicOperationError(
+          'VALIDATION_ERROR',
+          'A data de encerramento não pode ser anterior ao início da sessão.'
+        );
+      }
+
       // 2. Valida conclusão de acordo com a etapa atingida
-      const concluida = validarConclusaoSessao(dadosFinalizacao.etapaAtingida);
+      const concluida = validarConclusaoSessao(finalizacaoValida.etapaAtingida);
 
       const errosValidados: Array<ErroParaRegistrar & { disciplinaId: string; estilo: 'enem' | 'conteudista' | 'misto' }> = [];
-      for (const erro of dadosFinalizacao.errosParaRegistrar ?? []) {
+      for (const erro of finalizacaoValida.errosParaRegistrar ?? []) {
         const [questao] = await tx
           .select({ disciplinaId: questoes.disciplinaId, estilo: questoes.estilo })
           .from(questoes)
@@ -160,20 +250,46 @@ export async function concluirSessao(
           .limit(1);
 
         const [tentativa] = await tx
-          .select({ id: tentativas.id })
+          .select({
+            id: tentativas.id,
+            perfilId: tentativas.perfilId,
+            sessaoId: tentativas.sessaoId,
+            questaoId: tentativas.questaoId,
+            correta: tentativas.correta,
+          })
           .from(tentativas)
           .where(
             and(
               eq(tentativas.id, erro.tentativaId),
               eq(tentativas.perfilId, perfil.id),
-              eq(tentativas.sessaoId, sessaoId),
+              eq(tentativas.sessaoId, sessaoIdValido),
               eq(tentativas.questaoId, erro.questaoId)
             )
           )
           .limit(1);
 
-        if (!questao || !tentativa) {
+        if (
+          !questao ||
+          !tentativa ||
+          (tentativa.perfilId && tentativa.perfilId !== perfil.id) ||
+          (tentativa.sessaoId && tentativa.sessaoId !== sessaoIdValido) ||
+          (tentativa.questaoId && tentativa.questaoId !== erro.questaoId)
+        ) {
           throw new PublicOperationError('NOT_FOUND', 'Registro relacionado não encontrado ou acesso não permitido.');
+        }
+
+        if (bloco.disciplinaId && questao.disciplinaId && bloco.disciplinaId !== questao.disciplinaId) {
+          throw new PublicOperationError(
+            'VALIDATION_ERROR',
+            'A questão informada não pertence à disciplina do bloco da sessão.'
+          );
+        }
+
+        if (tentativa.correta === true) {
+          throw new PublicOperationError(
+            'CONFLICT',
+            'Não é permitido registrar erro para uma tentativa acertada.'
+          );
         }
 
         errosValidados.push({ ...erro, ...questao });
@@ -183,14 +299,14 @@ export async function concluirSessao(
       const [sessaoConcluida] = await tx
         .update(sessoes)
         .set({
-          encerradaEm: dadosFinalizacao.encerradaEm || new Date(),
-          segundosEfetivos: dadosFinalizacao.segundosEfetivos ?? sessao.segundosEfetivos,
-          segundosPausa: dadosFinalizacao.segundosPausa ?? sessao.segundosPausa,
-          etapaAtingida: dadosFinalizacao.etapaAtingida,
-          notaLivre: dadosFinalizacao.notaLivre ?? sessao.notaLivre,
+          encerradaEm: finalizacaoValida.encerradaEm || new Date(),
+          segundosEfetivos: finalizacaoValida.segundosEfetivos ?? sessao.segundosEfetivos,
+          segundosPausa: finalizacaoValida.segundosPausa ?? sessao.segundosPausa,
+          etapaAtingida: finalizacaoValida.etapaAtingida,
+          notaLivre: finalizacaoValida.notaLivre ?? sessao.notaLivre,
           concluida,
         })
-        .where(and(eq(sessoes.id, sessaoId), eq(sessoes.perfilId, perfil.id)))
+        .where(and(eq(sessoes.id, sessaoIdValido), eq(sessoes.perfilId, perfil.id)))
         .returning();
 
       if (!sessaoConcluida) {
@@ -258,4 +374,3 @@ export async function concluirSessao(
     throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível concluir a sessão.');
   }
 }
-

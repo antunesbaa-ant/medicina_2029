@@ -2,8 +2,16 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FSRS, Card as FSRSCard, Rating, State } from 'ts-fsrs';
 import { obterCardsParaRevisao, registrarRevisaoCard } from './fsrs';
 
+const PERFIL_1_ID = '10000000-0000-4000-8000-000000000001';
+const CARD_1_ID = '50000000-0000-4000-8000-000000000001';
+const CARD_INEXISTENTE_ID = '50000000-0000-4000-8000-000000000099';
+const TOPICO_1_ID = '31000000-0000-4000-8000-000000000001';
+
 vi.mock('../../lib/authorization', () => ({
-  requireRole: vi.fn().mockResolvedValue({ id: 'perfil-1', papel: 'estudante' }),
+  requireRole: vi.fn().mockResolvedValue({
+    id: '10000000-0000-4000-8000-000000000001',
+    papel: 'estudante',
+  }),
 }));
 
 const dbDouble = vi.hoisted(() => {
@@ -32,7 +40,7 @@ const dbDouble = vi.hoisted(() => {
 vi.mock('../../db', () => ({ db: dbDouble.db }));
 
 const cardPendente = {
-  id: 'card-1', perfilId: 'perfil-1', topicoId: 'topico-1', frente: 'Frente', verso: 'Verso',
+  id: CARD_1_ID, perfilId: PERFIL_1_ID, topicoId: TOPICO_1_ID, frente: 'Frente', verso: 'Verso',
   origem: 'manual', status: 'aprovado', suspenso: false, fonteChunkIds: null,
   due: new Date('2026-10-20T10:00:00Z'), stability: 1, difficulty: 5,
   elapsedDays: 0, scheduledDays: 0, reps: 0, lapses: 0, state: 'new', lastReview: null,
@@ -60,8 +68,37 @@ describe('FSRS Spaced Repetition Tests', () => {
 
   it('falha sem efeitos ao registrar card inexistente', async () => {
     dbDouble.queues.select.push([]);
-    await expect(registrarRevisaoCard('non-existent', 'good', 2500)).resolves.toEqual({
+    await expect(registrarRevisaoCard(CARD_INEXISTENTE_ID, 'good', 2500)).resolves.toEqual({
       sucesso: false, code: 'NOT_FOUND', mensagem: 'Registro não encontrado ou acesso não permitido.',
+    });
+    expect(dbDouble.db.update).not.toHaveBeenCalled();
+    expect(dbDouble.db.insert).not.toHaveBeenCalled();
+  });
+
+  it('rejeita UUID inválido, rating inválido ou duração fora dos limites sem acessar o banco', async () => {
+    await expect(registrarRevisaoCard('card-invalido', 'good', 2500)).resolves.toMatchObject({
+      sucesso: false, code: 'VALIDATION_ERROR',
+    });
+    await expect(
+      registrarRevisaoCard(CARD_1_ID, 'invalido' as unknown as 'good', 2500)
+    ).resolves.toMatchObject({
+      sucesso: false, code: 'VALIDATION_ERROR',
+    });
+    await expect(registrarRevisaoCard(CARD_1_ID, 'good', 0)).resolves.toMatchObject({
+      sucesso: false, code: 'VALIDATION_ERROR',
+    });
+    await expect(registrarRevisaoCard(CARD_1_ID, 'good', 5_000_000)).resolves.toMatchObject({
+      sucesso: false, code: 'VALIDATION_ERROR',
+    });
+    expect(dbDouble.db.transaction).not.toHaveBeenCalled();
+    expect(dbDouble.db.update).not.toHaveBeenCalled();
+    expect(dbDouble.db.insert).not.toHaveBeenCalled();
+  });
+
+  it('rejeita revisão de card suspenso ou não aprovado sem escrever', async () => {
+    dbDouble.queues.select.push([{ ...cardPendente, suspenso: true }]);
+    await expect(registrarRevisaoCard(CARD_1_ID, 'good', 2500)).resolves.toMatchObject({
+      sucesso: false, code: 'CONFLICT',
     });
     expect(dbDouble.db.update).not.toHaveBeenCalled();
     expect(dbDouble.db.insert).not.toHaveBeenCalled();
@@ -69,10 +106,10 @@ describe('FSRS Spaced Repetition Tests', () => {
 
   it('confirma update e histórico dentro de uma única transação', async () => {
     dbDouble.queues.select.push([cardPendente]);
-    dbDouble.queues.update.push([{ id: 'card-1' }]);
-    dbDouble.queues.insert.push([{ id: 'revisao-1' }]);
+    dbDouble.queues.update.push([{ id: CARD_1_ID }]);
+    dbDouble.queues.insert.push([{ id: '51000000-0000-4000-8000-000000000001' }]);
 
-    const res = await registrarRevisaoCard('card-1', 'good', 2500);
+    const res = await registrarRevisaoCard(CARD_1_ID, 'good', 2500);
     expect(res.sucesso).toBe(true);
     expect(dbDouble.db.transaction).toHaveBeenCalledOnce();
     expect(dbDouble.db.update).toHaveBeenCalledOnce();
@@ -81,9 +118,9 @@ describe('FSRS Spaced Repetition Tests', () => {
 
   it('falha a transação quando o histórico não é confirmado', async () => {
     dbDouble.queues.select.push([cardPendente]);
-    dbDouble.queues.update.push([{ id: 'card-1' }]);
+    dbDouble.queues.update.push([{ id: CARD_1_ID }]);
     dbDouble.queues.insert.push([]);
-    await expect(registrarRevisaoCard('card-1', 'good', 2500)).resolves.toMatchObject({
+    await expect(registrarRevisaoCard(CARD_1_ID, 'good', 2500)).resolves.toMatchObject({
       sucesso: false, code: 'PERSISTENCE_ERROR',
     });
   });
@@ -95,7 +132,7 @@ describe('FSRS Spaced Repetition Tests', () => {
       [{ revisadoEm, rating: 'good', duracaoMs: 2500 }],
     );
 
-    await expect(registrarRevisaoCard('card-1', 'good', 2500)).resolves.toMatchObject({
+    await expect(registrarRevisaoCard(CARD_1_ID, 'good', 2500)).resolves.toMatchObject({
       sucesso: true, idempotente: true,
     });
     expect(dbDouble.db.update).not.toHaveBeenCalled();
@@ -109,7 +146,7 @@ describe('FSRS Spaced Repetition Tests', () => {
       [{ revisadoEm, rating: 'good', duracaoMs: 2500 }],
     );
 
-    await expect(registrarRevisaoCard('card-1', 'easy', 2600)).resolves.toMatchObject({
+    await expect(registrarRevisaoCard(CARD_1_ID, 'easy', 2600)).resolves.toMatchObject({
       sucesso: false, code: 'CONFLICT',
     });
     expect(dbDouble.db.update).not.toHaveBeenCalled();

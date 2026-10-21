@@ -11,6 +11,7 @@ import {
   operationSuccess,
   type OperationResult,
 } from '../../lib/operation-result';
+import { registrarSimuladoInputSchema } from '../../lib/validation';
 
 export interface SimuladoAreaInput {
   area: string; // Ex: Linguagens, Matemática, Natureza, Humanas
@@ -75,11 +76,13 @@ export async function registrarSimulado(
 ): Promise<OperationResult<{ simuladoId: string; analiseStatus: 'pendente' }>> {
   const perfil = await requireRole('estudante');
 
-  try {
-    if (dados.areas.some((area) => area.total <= 0 || area.acertos < 0 || area.acertos > area.total)) {
-      return operationFailure('VALIDATION_ERROR', 'Os totais e acertos das áreas são inválidos.');
-    }
+  const validacao = registrarSimuladoInputSchema.safeParse(dados);
+  if (!validacao.ok) {
+    return operationFailure('VALIDATION_ERROR', validacao.message);
+  }
+  const validado = validacao.data;
 
+  try {
     return await db.transaction(async (tx) => {
       // Serializa por estudante inclusive quando ainda não existe linha para bloquear.
       await tx.execute(
@@ -100,12 +103,12 @@ export async function registrarSimulado(
         .insert(simulados)
         .values({
           perfilId: perfil.id,
-          formato: dados.formato,
-          data: new Date(dados.data),
-          condicoesReais: dados.condicoesReais,
-          duracaoMin: dados.duracaoMin,
-          local: dados.local,
-          composicaoProcedencia: dados.composicaoProcedencia
+          formato: validado.formato,
+          data: validado.data,
+          condicoesReais: validado.condicoesReais,
+          duracaoMin: validado.duracaoMin,
+          local: validado.local,
+          composicaoProcedencia: validado.composicaoProcedencia
         })
         .returning();
 
@@ -113,7 +116,7 @@ export async function registrarSimulado(
         throw new Error('simulado_insert_not_confirmed');
       }
 
-      for (const area of dados.areas) {
+      for (const area of validado.areas) {
         const pct = (area.acertos / area.total) * 100;
         const [areaInserida] = await tx
           .insert(simuladoAreas)

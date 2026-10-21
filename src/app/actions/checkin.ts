@@ -9,6 +9,7 @@ import {
   operationSuccess,
   type OperationResult,
 } from '../../lib/operation-result';
+import { registrarCheckinInputSchema } from '../../lib/validation';
 
 export interface DadosCheckin {
   horasSono: number;
@@ -23,17 +24,23 @@ export async function registrarCheckin(
 ): Promise<OperationResult<{ checkin: typeof checkins.$inferSelect }>> {
   const perfil = await requireRole('estudante');
 
+  const validacao = registrarCheckinInputSchema.safeParse(dados);
+  if (!validacao.ok) {
+    return operationFailure('VALIDATION_ERROR', validacao.message);
+  }
+  const validado = validacao.data;
+
   try {
     const [novoCheckin] = await db
       .insert(checkins)
       .values({
         perfilId: perfil.id,
         data: new Date(),
-        horasSono: dados.horasSono,
-        exercicioMin: dados.exercicioMin,
-        humor: dados.humor,
-        energia: dados.energia,
-        notaLivre: dados.notaLivre || null,
+        horasSono: validado.horasSono,
+        exercicioMin: validado.exercicioMin,
+        humor: validado.humor,
+        energia: validado.energia,
+        notaLivre: validado.notaLivre || null,
       })
       .returning();
 

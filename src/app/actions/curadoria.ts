@@ -26,6 +26,10 @@ import {
   operationSuccess,
   type OperationResult,
 } from '../../lib/operation-result';
+import {
+  enfileirarGeracaoInputSchema,
+  curarItemInputSchema,
+} from '../../lib/validation';
 
 interface GeracaoConfirmada {
   itensGerados: number;
@@ -48,17 +52,28 @@ export async function enfileirarGeracaoDeArtefatos(
   arquivoId: string
 ): Promise<OperationResult<GeracaoConfirmada>> {
   const responsavel = await requireRole('responsavel');
+
+  const validacao = enfileirarGeracaoInputSchema.safeParse({ arquivoId });
+  if (!validacao.ok) {
+    return operationFailure('VALIDATION_ERROR', validacao.message);
+  }
+  const { arquivoId: arquivoIdValido } = validacao.data;
+
   try {
     const [arquivo] = await db
-      .select({ id: acervoArquivos.id, statusProcessamento: acervoArquivos.statusProcessamento })
+      .select({
+        id: acervoArquivos.id,
+        enviadoPor: acervoArquivos.enviadoPor,
+        statusProcessamento: acervoArquivos.statusProcessamento,
+      })
       .from(acervoArquivos)
       .where(and(
-        eq(acervoArquivos.id, arquivoId),
+        eq(acervoArquivos.id, arquivoIdValido),
         eq(acervoArquivos.enviadoPor, responsavel.id)
       ))
       .limit(1);
 
-    if (!arquivo) {
+    if (!arquivo || (arquivo.enviadoPor && arquivo.enviadoPor !== responsavel.id)) {
       return operationFailure('NOT_FOUND', 'Arquivo não encontrado.');
     }
     if (arquivo.statusProcessamento !== 'concluido') {
@@ -72,7 +87,7 @@ export async function enfileirarGeracaoDeArtefatos(
       .select({ itensGerados: geracoes.itensGerados })
       .from(geracoes)
       .where(and(
-        eq(geracoes.arquivoIds, [arquivoId]),
+        eq(geracoes.arquivoIds, [arquivoIdValido]),
         eq(geracoes.status, 'concluida')
       ))
       .limit(1);
@@ -94,7 +109,7 @@ export async function enfileirarGeracaoDeArtefatos(
       })
       .from(acervoChunks)
       .innerJoin(topicos, eq(acervoChunks.topicoId, topicos.id))
-      .where(eq(acervoChunks.arquivoId, arquivoId));
+      .where(eq(acervoChunks.arquivoId, arquivoIdValido));
 
     if (chunks.length === 0) {
       return operationFailure('NOT_FOUND', 'Não há conteúdo classificado disponível para geração.');
@@ -115,6 +130,10 @@ export async function enfileirarGeracaoDeArtefatos(
           disciplinaId: c.disciplinaId,
         });
       }
+    }
+
+    if (chunksPorTopico.size === 0) {
+      return operationFailure('NOT_FOUND', 'Não há conteúdo classificado disponível para geração.');
     }
 
     // Geração externa ocorre antes da transação: não é possível torná-la atômica com PostgreSQL.
@@ -144,14 +163,14 @@ export async function enfileirarGeracaoDeArtefatos(
 
     return await db.transaction(async (tx) => {
       await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`curadoria-geracao:${arquivoId}`}::text, 0))`
+        sql`select pg_advisory_xact_lock(hashtextextended(${`curadoria-geracao:${arquivoIdValido}`}::text, 0))`
       );
 
       const [concorrente] = await tx
         .select({ itensGerados: geracoes.itensGerados })
         .from(geracoes)
         .where(and(
-          eq(geracoes.arquivoIds, [arquivoId]),
+          eq(geracoes.arquivoIds, [arquivoIdValido]),
           eq(geracoes.status, 'concluida')
         ))
         .limit(1);
@@ -230,7 +249,7 @@ export async function enfileirarGeracaoDeArtefatos(
               gabarito: q.gabarito,
               resolucao: q.resolucao,
               status: 'rascunho',
-              arquivoOrigemId: arquivoId
+              arquivoOrigemId: arquivoIdValido
             })
             .returning({ id: questoes.id });
           if (!questao) throw new Error('question_insert_not_confirmed');
@@ -250,7 +269,7 @@ export async function enfileirarGeracaoDeArtefatos(
       const [geracaoRegistrada] = await tx.insert(geracoes).values({
         tipoArtefato: 'lote_curadoria',
         topicoId: gerados[0].topicoId,
-        arquivoIds: [arquivoId],
+        arquivoIds: [arquivoIdValido],
         chunkIds: [],
         modelo: 'gemini',
         promptVersao: 'f1.07',
@@ -345,136 +364,184 @@ export async function curarItem(
   motivoRejeicao?: string
 ): Promise<OperationResult<{ curadoriaId: string; decisao: typeof decisao; mensagem: string }>> {
   const responsavel = await requireRole('responsavel');
+
+  const validacao = curarItemInputSchema.safeParse({
+    curadoriaId,
+    decisao,
+    novosDados,
+    motivoRejeicao,
+  });
+  if (!validacao.ok) {
+    return operationFailure('VALIDATION_ERROR', validacao.message);
+  }
+  const {
+    curadoriaId: curadoriaIdValido,
+    decisao: decisaoValida,
+    novosDados: dadosEditadosValidos,
+    motivoRejeicao: motivoValido,
+  } = validacao.data;
+
   try {
     return await db.transaction(async (tx) => {
       await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`curadoria-decisao:${curadoriaId}`}::text, 0))`
+        sql`select pg_advisory_xact_lock(hashtextextended(${`curadoria-decisao:${curadoriaIdValido}`}::text, 0))`
       );
 
       const [item] = await tx
         .select()
         .from(curadoriaFila)
-        .where(eq(curadoriaFila.id, curadoriaId))
+        .where(eq(curadoriaFila.id, curadoriaIdValido))
         .limit(1);
 
-    if (!item) {
-      return operationFailure('NOT_FOUND', 'Item de curadoria não encontrado.');
-    }
-
-    if (item.decisao !== 'pendente') {
-      if (item.decisao === decisao) {
-        return operationSuccess({
-          curadoriaId,
-          decisao,
-          mensagem: 'Esta decisão de curadoria já havia sido salva.',
-        });
+      if (!item) {
+        return operationFailure('NOT_FOUND', 'Item de curadoria não encontrado.');
       }
-      return operationFailure('CONFLICT', 'O item já recebeu outra decisão de curadoria.');
-    }
 
-    const editado = decisao === 'editado_e_aprovado';
-    const estudante = item.artefatoTipo === 'flashcard' && decisao !== 'rejeitado'
-      ? await requireManagedStudentProfile()
-      : null;
+      if (item.decisao !== 'pendente') {
+        if (item.decisao === decisaoValida) {
+          return operationSuccess({
+            curadoriaId: curadoriaIdValido,
+            decisao: decisaoValida,
+            mensagem: 'Esta decisão de curadoria já havia sido salva.',
+          });
+        }
+        return operationFailure('CONFLICT', 'O item já recebeu outra decisão de curadoria.');
+      }
 
-    // 1. Atualiza o artefato de origem
-    if (item.artefatoTipo === 'resumo') {
-      const [materialAtualizado] = await tx
-        .update(materiais)
+      const editado = decisaoValida === 'editado_e_aprovado';
+      if (editado) {
+        if (
+          item.artefatoTipo === 'resumo' &&
+          dadosEditadosValidos?.titulo === undefined &&
+          dadosEditadosValidos?.corpo === undefined
+        ) {
+          return operationFailure('VALIDATION_ERROR', 'Informe título ou corpo para editar um resumo.');
+        }
+        if (
+          item.artefatoTipo === 'flashcard' &&
+          dadosEditadosValidos?.pergunta === undefined &&
+          dadosEditadosValidos?.resposta === undefined
+        ) {
+          return operationFailure('VALIDATION_ERROR', 'Informe pergunta ou resposta para editar um flashcard.');
+        }
+        if (
+          item.artefatoTipo === 'questao' &&
+          dadosEditadosValidos?.enunciado === undefined &&
+          dadosEditadosValidos?.alternativas === undefined &&
+          dadosEditadosValidos?.gabarito === undefined
+        ) {
+          return operationFailure('VALIDATION_ERROR', 'Informe enunciado, alternativas ou gabarito para editar uma questão.');
+        }
+      }
+
+      const estudante = item.artefatoTipo === 'flashcard' && decisaoValida !== 'rejeitado'
+        ? await requireManagedStudentProfile()
+        : null;
+
+      // 1. Atualiza o artefato de origem verificando consistência relacional (topicoId)
+      if (item.artefatoTipo === 'resumo') {
+        const [materialAtualizado] = await tx
+          .update(materiais)
+          .set({
+            status: decisaoValida === 'rejeitado' ? 'rejeitado' : 'aprovado',
+            titulo: editado && dadosEditadosValidos?.titulo ? dadosEditadosValidos.titulo : undefined,
+            corpo: editado && dadosEditadosValidos?.corpo ? dadosEditadosValidos.corpo : undefined,
+            aprovadoPor: decisaoValida === 'rejeitado' ? null : responsavel.id,
+            aprovadoEm: decisaoValida === 'rejeitado' ? null : new Date()
+          })
+          .where(and(
+            eq(materiais.id, item.artefatoId),
+            eq(materiais.topicoId, item.topicoId)
+          ))
+          .returning({ id: materiais.id });
+        if (!materialAtualizado) {
+          return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
+        }
+      } else if (item.artefatoTipo === 'flashcard') {
+        const [flashcardAtualizado] = await tx
+          .update(perguntasAtivas)
+          .set({
+            status: decisaoValida === 'rejeitado' ? 'rejeitado' : 'aprovado',
+            pergunta: editado && dadosEditadosValidos?.pergunta ? dadosEditadosValidos.pergunta : undefined,
+            resposta: editado && dadosEditadosValidos?.resposta ? dadosEditadosValidos.resposta : undefined
+          })
+          .where(and(
+            eq(perguntasAtivas.id, item.artefatoId),
+            eq(perguntasAtivas.topicoId, item.topicoId)
+          ))
+          .returning({ id: perguntasAtivas.id });
+        if (!flashcardAtualizado) {
+          return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
+        }
+
+        // Se aprovado, insere o flashcard na tabela de FSRS `cards` para estudos do estudante
+        if (decisaoValida === 'aprovado' || decisaoValida === 'editado_e_aprovado') {
+          const [flashcard] = await tx
+            .select()
+            .from(perguntasAtivas)
+            .where(eq(perguntasAtivas.id, item.artefatoId))
+            .limit(1);
+          if (!flashcard) throw new Error('approved_flashcard_not_found');
+
+          // Criar card de repetição FSRS
+          const [cardCriado] = await tx.insert(cards).values({
+            perfilId: estudante!.id,
+            topicoId: item.topicoId,
+            frente: flashcard.pergunta,
+            verso: flashcard.resposta,
+            origem: 'gerado',
+            status: 'aprovado',
+            suspenso: false,
+            due: new Date(), // Vence hoje imediatamente
+            stability: 1.0,
+            difficulty: 5.0,
+            elapsedDays: 0,
+            scheduledDays: 0,
+            reps: 0,
+            lapses: 0,
+            state: 'new'
+          }).returning({ id: cards.id });
+          if (!cardCriado) throw new Error('fsrs_card_insert_not_confirmed');
+        }
+      } else if (item.artefatoTipo === 'questao') {
+        const [questaoAtualizada] = await tx
+          .update(questoes)
+          .set({
+            status: decisaoValida === 'rejeitado' ? 'rejeitado' : 'aprovado',
+            enunciado: editado && dadosEditadosValidos?.enunciado ? dadosEditadosValidos.enunciado : undefined,
+            alternativas: editado && dadosEditadosValidos?.alternativas ? dadosEditadosValidos.alternativas : undefined,
+            gabarito: editado && dadosEditadosValidos?.gabarito ? dadosEditadosValidos.gabarito : undefined
+          })
+          .where(eq(questoes.id, item.artefatoId))
+          .returning({ id: questoes.id });
+        if (!questaoAtualizada) {
+          return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
+        }
+      } else {
+        return operationFailure('VALIDATION_ERROR', 'Tipo de artefato de curadoria inválido.');
+      }
+
+      // 2. Atualiza a fila de curadoria
+      const [filaAtualizada] = await tx
+        .update(curadoriaFila)
         .set({
-          status: decisao === 'rejeitado' ? 'rejeitado' : 'aprovado',
-          titulo: editado && novosDados?.titulo ? novosDados.titulo : undefined,
-          corpo: editado && novosDados?.corpo ? novosDados.corpo : undefined,
-          aprovadoPor: decisao === 'rejeitado' ? null : responsavel.id,
-          aprovadoEm: decisao === 'rejeitado' ? null : new Date()
+          decisao: decisaoValida,
+          revisadoEm: new Date(),
+          motivoRejeicao: decisaoValida === 'rejeitado' ? (motivoValido ?? null) : null,
+          editado
         })
-        .where(eq(materiais.id, item.artefatoId))
-        .returning({ id: materiais.id });
-      if (!materialAtualizado) {
-        return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
-      }
-    } else if (item.artefatoTipo === 'flashcard') {
-      const [flashcardAtualizado] = await tx
-        .update(perguntasAtivas)
-        .set({
-          status: decisao === 'rejeitado' ? 'rejeitado' : 'aprovado',
-          pergunta: editado && novosDados?.pergunta ? novosDados.pergunta : undefined,
-          resposta: editado && novosDados?.resposta ? novosDados.resposta : undefined
-        })
-        .where(eq(perguntasAtivas.id, item.artefatoId))
-        .returning({ id: perguntasAtivas.id });
-      if (!flashcardAtualizado) {
-        return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
-      }
+        .where(and(
+          eq(curadoriaFila.id, curadoriaIdValido),
+          eq(curadoriaFila.decisao, 'pendente')
+        ))
+        .returning({ id: curadoriaFila.id });
+      if (!filaAtualizada) throw new Error('curation_queue_update_not_confirmed');
 
-      // Se aprovado, insere o flashcard na tabela de FSRS `cards` para estudos do estudante
-      if (decisao === 'aprovado' || decisao === 'editado_e_aprovado') {
-        const [flashcard] = await tx
-          .select()
-          .from(perguntasAtivas)
-          .where(eq(perguntasAtivas.id, item.artefatoId))
-          .limit(1);
-        if (!flashcard) throw new Error('approved_flashcard_not_found');
-
-        // Criar card de repetição FSRS
-        const [cardCriado] = await tx.insert(cards).values({
-          perfilId: estudante!.id,
-          topicoId: item.topicoId,
-          frente: flashcard.pergunta,
-          verso: flashcard.resposta,
-          origem: 'gerado',
-          status: 'aprovado',
-          suspenso: false,
-          due: new Date(), // Vence hoje imediatamente
-          stability: 1.0,
-          difficulty: 5.0,
-          elapsedDays: 0,
-          scheduledDays: 0,
-          reps: 0,
-          lapses: 0,
-          state: 'new'
-        }).returning({ id: cards.id });
-        if (!cardCriado) throw new Error('fsrs_card_insert_not_confirmed');
-      }
-    } else if (item.artefatoTipo === 'questao') {
-      const [questaoAtualizada] = await tx
-        .update(questoes)
-        .set({
-          status: decisao === 'rejeitado' ? 'rejeitado' : 'aprovado',
-          enunciado: editado && novosDados?.enunciado ? novosDados.enunciado : undefined,
-          alternativas: editado && novosDados?.alternativas ? novosDados.alternativas : undefined,
-          gabarito: editado && novosDados?.gabarito ? novosDados.gabarito : undefined
-        })
-        .where(eq(questoes.id, item.artefatoId))
-        .returning({ id: questoes.id });
-      if (!questaoAtualizada) {
-        return operationFailure('NOT_FOUND', 'O artefato associado não foi encontrado.');
-      }
-    } else {
-      return operationFailure('VALIDATION_ERROR', 'Tipo de artefato de curadoria inválido.');
-    }
-
-    // 2. Atualiza a fila de curadoria
-    const [filaAtualizada] = await tx
-      .update(curadoriaFila)
-      .set({
-        decisao,
-        revisadoEm: new Date(),
-        motivoRejeicao: decisao === 'rejeitado' ? motivoRejeicao : null,
-        editado
-      })
-      .where(and(
-        eq(curadoriaFila.id, curadoriaId),
-        eq(curadoriaFila.decisao, 'pendente')
-      ))
-      .returning({ id: curadoriaFila.id });
-    if (!filaAtualizada) throw new Error('curation_queue_update_not_confirmed');
-
-    return operationSuccess({
-      curadoriaId,
-      decisao,
-      mensagem: 'Decisão de curadoria salva com sucesso.',
-    });
+      return operationSuccess({
+        curadoriaId: curadoriaIdValido,
+        decisao: decisaoValida,
+        mensagem: 'Decisão de curadoria salva com sucesso.',
+      });
     });
   } catch (error) {
     if (error instanceof AuthorizationError) throw error;

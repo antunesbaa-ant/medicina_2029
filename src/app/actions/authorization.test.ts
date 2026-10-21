@@ -53,6 +53,7 @@ const dbDouble = vi.hoisted(() => {
       'set',
       'returning',
       'onConflictDoUpdate',
+      'onConflictDoNothing',
       'for',
     ];
 
@@ -152,14 +153,23 @@ const responsavel: TestProfile = {
   papel: 'responsavel',
 };
 
+const DISCIPLINA_1_ID = '00000000-0000-0000-0000-000000000001';
+const BLOCO_1_ID = 'b1b1b1b1-1111-4111-8111-111111111101';
+const TOPICO_1_ID = '11111111-1111-4111-8111-111111111101';
+const SESSAO_ALHEIA_ID = '22222222-2222-4222-8222-222222222222';
+const QUESTAO_ALHEIA_ID = '33333333-3333-4333-8333-333333333333';
+const TENTATIVA_ALHEIA_ID = '44444444-4444-4444-8444-444444444444';
+const ERRO_ALHEIO_ID = '55555555-5555-4555-8555-555555555555';
+const CARD_ALHEIO_ID = '66666666-6666-4666-8666-666666666666';
+
 const uploadArgs = [
-  'disciplina-1',
+  DISCIPLINA_1_ID,
   'Livro Teste',
   'livro',
   1,
   'enem',
   'livro.pdf',
-  Buffer.from('pdf de teste').toString('base64'),
+  Buffer.from('%PDF-1.4\npdf de teste\n%%EOF').toString('base64'),
 ] as const;
 
 describe('Autorização das Server Actions', () => {
@@ -179,7 +189,7 @@ describe('Autorização das Server Actions', () => {
   it('bloqueia usuário não autenticado antes de acessar banco ou Storage', async () => {
     await expect(exportarDadosCompletos()).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
     await expect(enviarArquivo(...uploadArgs)).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
-    await expect(iniciarSessao('bloco-1', 'topico-1')).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
+    await expect(iniciarSessao(BLOCO_1_ID, TOPICO_1_ID)).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
 
     expect(dbDouble.db.select).not.toHaveBeenCalled();
     expect(dbDouble.db.insert).not.toHaveBeenCalled();
@@ -203,16 +213,19 @@ describe('Autorização das Server Actions', () => {
   it('impede responsável de iniciar sessão de estudo', async () => {
     authState.profile = responsavel;
 
-    await expect(iniciarSessao('bloco-1', 'topico-1')).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await expect(iniciarSessao(BLOCO_1_ID, TOPICO_1_ID)).rejects.toMatchObject({ code: 'FORBIDDEN' });
 
     expect(dbDouble.db.insert).not.toHaveBeenCalled();
   });
 
-  it('usa a identidade da sessão no upload autorizado', async () => {
+  it('usa a identidade da sessão no upload autorizado e enfileira job durável com o mesmo owner', async () => {
     authState.profile = responsavel;
     vi.stubEnv('SUPABASE_ANON_KEY', 'chave-de-teste');
     dbDouble.queues.select.push([]);
-    dbDouble.queues.insert.push([{ id: 'arquivo-1' }]);
+    dbDouble.queues.insert.push(
+      [{ id: 'arquivo-1' }],
+      [{ id: 'job-1', status: 'aguardando', etapaAtual: 'extracao' }]
+    );
 
     const resultado = await enviarArquivo(...uploadArgs);
 
@@ -220,11 +233,12 @@ describe('Autorização das Server Actions', () => {
     expect(dbDouble.valuesCalls).toContainEqual(expect.objectContaining({
       enviadoPor: responsavel.id,
     }));
+    expect(dbDouble.valuesCalls).toContainEqual(expect.objectContaining({
+      arquivoId: 'arquivo-1',
+      enviadoPor: responsavel.id,
+    }));
     expect(storageMocks.uploadToSupabaseStorage).toHaveBeenCalledOnce();
-
-    await vi.waitFor(() => {
-      expect(dbDouble.db.update).toHaveBeenCalled();
-    });
+    expect(dbDouble.db.update).not.toHaveBeenCalled();
   });
 
   it('não conclui nem gera registros derivados para uma sessão alheia', async () => {
@@ -232,11 +246,11 @@ describe('Autorização das Server Actions', () => {
     dbDouble.queues.select.push([]);
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    await expect(concluirSessao('sessao-alheia', {
+    await expect(concluirSessao(SESSAO_ALHEIA_ID, {
       etapaAtingida: 'registro',
       errosParaRegistrar: [{
-        questaoId: 'questao-alheia',
-        tentativaId: 'tentativa-alheia',
+        questaoId: QUESTAO_ALHEIA_ID,
+        tentativaId: TENTATIVA_ALHEIA_ID,
         tipoErro: 'conteudo',
       }],
     })).rejects.toMatchObject({ code: 'NOT_FOUND' });
@@ -251,7 +265,7 @@ describe('Autorização das Server Actions', () => {
     dbDouble.queues.update.push([]);
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    await expect(atualizarSessao('sessao-alheia', {
+    await expect(atualizarSessao(SESSAO_ALHEIA_ID, {
       segundosEfetivos: 120,
     })).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
@@ -263,7 +277,7 @@ describe('Autorização das Server Actions', () => {
     authState.profile = estudante;
     dbDouble.queues.update.push([]);
 
-    const erro = await resolverErro('erro-alheio');
+    const erro = await resolverErro(ERRO_ALHEIO_ID);
     expect(erro).toEqual({
       ok: false,
       code: 'NOT_FOUND',
@@ -273,7 +287,7 @@ describe('Autorização das Server Actions', () => {
 
     dbDouble.db.update.mockClear();
     dbDouble.queues.select.push([]);
-    const card = await registrarRevisaoCard('card-alheio', 'good', 1_000);
+    const card = await registrarRevisaoCard(CARD_ALHEIO_ID, 'good', 1_000);
 
     expect(card).toEqual({
       sucesso: false,
@@ -286,13 +300,22 @@ describe('Autorização das Server Actions', () => {
 
   it('mantém o acesso legítimo do estudante e grava seu perfil efetivo', async () => {
     authState.profile = estudante;
+    dbDouble.queues.select.push(
+      [],
+      [{
+        blocoId: BLOCO_1_ID,
+        estudantePerfilId: estudante.id,
+        blocoDisciplinaId: DISCIPLINA_1_ID,
+        topicoDisciplinaId: DISCIPLINA_1_ID,
+      }],
+    );
     dbDouble.queues.insert.push([{ id: 'sessao-autorizada' }]);
 
-    await expect(iniciarSessao('bloco-1', 'topico-1')).resolves.toBe('sessao-autorizada');
+    await expect(iniciarSessao(BLOCO_1_ID, TOPICO_1_ID)).resolves.toBe('sessao-autorizada');
     expect(dbDouble.valuesCalls).toContainEqual(expect.objectContaining({
       perfilId: estudante.id,
-      cicloBlocoId: 'bloco-1',
-      topicoId: 'topico-1',
+      cicloBlocoId: BLOCO_1_ID,
+      topicoId: TOPICO_1_ID,
     }));
   });
 

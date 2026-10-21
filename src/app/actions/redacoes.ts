@@ -11,6 +11,10 @@ import {
   operationSuccess,
   type OperationResult,
 } from '../../lib/operation-result';
+import {
+  registrarRedacaoInputSchema,
+  registrarRepertorioInputSchema,
+} from '../../lib/validation';
 
 export interface RegistrarRedacaoInput {
   formato: 'enem' | 'genero_uece';
@@ -91,16 +95,34 @@ export async function registrarRedacao(
 ): Promise<OperationResult<{ redacaoId: string }>> {
   const perfil = await requireRole('estudante');
 
+  const validacao = registrarRedacaoInputSchema.safeParse(dados);
+  if (!validacao.ok) {
+    return operationFailure('VALIDATION_ERROR', validacao.message);
+  }
+  const validado = validacao.data;
+
   try {
+    if (validado.generoId) {
+      const [generoExistente] = await db
+        .select({ id: generos.id })
+        .from(generos)
+        .where(eq(generos.id, validado.generoId))
+        .limit(1);
+
+      if (!generoExistente) {
+        return operationFailure('NOT_FOUND', 'Gênero textual não encontrado.');
+      }
+    }
+
     const [nova] = await db
       .insert(redacoes)
       .values({
         perfilId: perfil.id,
-        formato: dados.formato,
-        generoId: dados.generoId || null,
-        tema: dados.tema,
-        texto: dados.texto,
-        minutosGastos: dados.minutosGastos,
+        formato: validado.formato,
+        generoId: validado.generoId || null,
+        tema: validado.tema,
+        texto: validado.texto,
+        minutosGastos: validado.minutosGastos,
         escritaEm: new Date(),
         notaTotal: null,
       })
@@ -124,15 +146,21 @@ export async function registrarRepertorio(
 ): Promise<OperationResult<{ repertorioId: string }>> {
   const perfil = await requireRole('estudante');
 
+  const validacao = registrarRepertorioInputSchema.safeParse(dados);
+  if (!validacao.ok) {
+    return operationFailure('VALIDATION_ERROR', validacao.message);
+  }
+  const validado = validacao.data;
+
   try {
     const [novo] = await db
       .insert(repertorios)
       .values({
         perfilId: perfil.id,
-        referencia: dados.referencia,
-        resumo2Linhas: dados.resumo2Linhas,
-        temasAplicaveis: dados.temasAplicaveis,
-        categoria: dados.categoria,
+        referencia: validado.referencia,
+        resumo2Linhas: validado.resumo2Linhas,
+        temasAplicaveis: validado.temasAplicaveis,
+        categoria: validado.categoria,
       })
       .returning({ id: repertorios.id });
 

@@ -4,7 +4,7 @@
 
 **Princípio:** menor alteração segura possível; sem refatoração ampla sem necessidade
 
-**Estado:** F1.02 a F1.07 executadas; F1.03-M reprovou a proposta monolítica; F1.03-R e F1.07 foram aprovadas com ressalvas; nenhuma etapa desta sequência acessou ou alterou produção
+**Estado:** F1.02 a F1.10 executadas; F1.03-M reprovou a proposta monolítica; F1.03-R, F1.07, F1.08, F1.09 e F1.10 foram aprovadas com ressalvas; nenhuma etapa desta sequência acessou ou alterou produção
 
 ## 1. Estratégia geral
 
@@ -224,36 +224,56 @@ F1.15 Testes de segurança/E2E e operação
 
 ### F1.09 — Validação runtime e integridade relacional
 
+**Status:** concluída em 20/10/2026 como **APROVADA COM RESSALVAS**. Validação runtime reutilizável (`src/lib/validation.ts`) implementada sem dependências externas e aplicada às Server Actions prioritárias (`sessao.ts`, `fsrs.ts`, `simulados.ts`, `curadoria.ts`, `redacoes.ts`, `acervo.ts`) e complementares (`checkin.ts`, `cadernoErros.ts`, `reestudo.ts`). Integridade relacional server-side reforçada antes de escrita, e proposta SQL reversível (`F1_09_INTEGRIDADE_E_IDEMPOTENCIA_PROPOSTA.sql` + `F1_09_ROLLBACK_INTEGRIDADE_E_IDEMPOTENCIA.sql`) versionada fora do journal automático e ensaiada em PostgreSQL 18.6 descartável (PGlite), preservando integralmente a expansão F1.03-R.
+
 - **Objetivo:** validar todo input não confiável e reforçar regras no banco.
-- **Arquivos potencialmente afetados:** actions, schema compartilhado de validação, `src/db/schema.ts`, novas migrations.
+- **Arquivos gerados/afetados:** `src/lib/validation.ts`, `src/lib/validation.test.ts`, `src/lib/mocks.ts`, `src/app/actions/sessao.ts`, `src/app/actions/fsrs.ts`, `src/app/actions/simulados.ts`, `src/app/actions/curadoria.ts`, `src/app/actions/redacoes.ts`, `src/app/actions/acervo.ts`, `src/app/actions/checkin.ts`, `src/app/actions/cadernoErros.ts`, `src/app/actions/reestudo.ts`, testes de actions (`actions.test.ts`, `fsrs.test.ts`, `simulados-f1_07.test.ts`, `curadoria.test.ts`, `redacoes.test.ts`, `acervo.test.ts`, `authorization.test.ts`, `f1_07_operations.test.ts`, `reestudo.test.ts`, `f1_09_integracao_pg.test.ts`), `docs/modernizacao/propostas/F1_09_INTEGRIDADE_E_IDEMPOTENCIA_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_09_ROLLBACK_INTEGRIDADE_E_IDEMPOTENCIA.sql`, `docs/modernizacao/RELATORIO_F1_09.md`, `~/Documents/MEDICINA_2029_F1_09_RELATORIO.md`.
 - **Dependências:** F1.03; recomendado após F1.08 para conhecer as transações.
 - **Riscos:** dados legados inválidos impedirem constraints; compatibilidade de formulários.
 - **Estratégia:** schemas pequenos por action; limites de texto/arrays/números/datas; checks de humor/energia/série/incidência/acertos; FKs ausentes; uniques/PKs em associações; saneamento prévio somente após auditoria autorizada.
 - **Testes necessários:** valores de borda, payload enorme, divisão por zero, datas inválidas, associação duplicada e órfãos.
 - **Critérios de aceite:** entrada inválida é rejeitada antes do DB; banco impede estados impossíveis; erros públicos são estáveis.
 - **Reversão:** remover constraints apenas por migration de rollback; validadores podem ser revertidos por módulo.
+- **Resultado:** módulo `src/lib/validation.ts` valida UUIDs, strings, limites numéricos, enums, datas, arrays com unicidade (`uniqueBy`), objetos com bloqueio de campos de identidade fornecidos pelo cliente (`perfilId`, `authUserId`, `papel`, `enviadoPor`, `aprovadoPor`, `estudantePerfilId`) e uploads PDF (extensão `.pdf`, bloqueio de path traversal, teto de 20 MiB e magic bytes `%PDF-`). Integridade relacional verificada em `iniciarSessao` (ownership do ciclo e compatibilidade `topico.disciplinaId === cicloBloco.disciplinaId`), `atualizarSessao` (somente sessão aberta), `concluirSessao` (ownership do ciclo, `encerradaEm >= iniciadaEm`, rejeição de erro para tentativa correta, conflito de etapa em sessão já encerrada), `registrarRevisaoCard` (card aprovado e não suspenso), `curarItem` (consistência `topicoId` e campos por tipo de artefato) e `registrarRedacao` (existência de `generoId`).
+- **Proposta SQL e idempotência persistente:** `F1_09_INTEGRIDADE_E_IDEMPOTENCIA_PROPOSTA.sql` adiciona preflight diagnósticos, tabela `operacoes_idempotentes`, colunas nullable `chave_idempotencia` com índices parciais únicos em `card_revisoes` e `geracoes`, unicidades em `sessoes` abertas, `erros.tentativa_id`, `curadoria_fila(artefato_tipo, artefato_id)` e `acervo_arquivos.hash_conteudo`, e `CHECK` constraints (`NOT VALID` + `VALIDATE CONSTRAINT`), além de rollback atômico (`F1_09_ROLLBACK_INTEGRIDADE_E_IDEMPOTENCIA.sql`).
+- **Validação:** `npx tsc --noEmit` (0 erros), `npm run test:run` (26 suítes / 218 testes aprovados, incluindo integração real em PostgreSQL 18.6 descartável via `f1_09_integracao_pg.test.ts`), `npm run build`, `npx eslint` nos 22 arquivos TS modificados (0 erros, 0 avisos), `npx drizzle-kit check`, `git diff --check` e suíte RLS `scripts/f1_04/run-rls-validation.mjs` (41/41 cenários aprovados).
+- **Ressalvas:** a proposta SQL F1.09 permanece fora do journal automático e não foi aplicada em produção; o consumo direto da tabela `operacoes_idempotentes` pelas Server Actions depende da aplicação prévia da migration proposta em janela autorizada; upload continua em base64 até a F1.10.
+- **Próximo gate:** F1.10 (Upload e Storage confiáveis).
 
 ### F1.10 — Upload e Storage confiáveis
 
+**Status:** concluída em 20/10/2026 como **APROVADA COM RESSALVAS**. Upload endurecido com transporte binário via `FormData` (`enviarArquivoFormData`, preservando retrocompatibilidade com `enviarArquivo`), chave determinística endereçada por conteúdo (`acervo/<sha256>.pdf`), `upsert: false` por padrão no Supabase Storage, validação estrutural adicional de PDF (`%%EOF` e bloqueio de `/JavaScript`, `/JS`, `/Launch`, `/EmbeddedFiles`, `/RichMedia`, `/XFA`), geração autenticada de URLs assinadas de curta duração (`60..900`s) com rejeição de URLs públicas permanentes, reconciliação read-only Banco↔Storage sem exclusão automática (`reconciliarSnapshotsAcervo` e `diagnosticarReconciliacaoAcervo`) e proposta SQL versionada de policies de Storage privado (`F1_10_STORAGE_POLICIES_PROPOSTA.sql` e `F1_10_ROLLBACK_STORAGE_POLICIES.sql`).
+
 - **Objetivo:** garantir que sucesso signifique arquivo privado realmente persistido e validado.
-- **Arquivos potencialmente afetados:** `acervo.ts`, `supabaseStorage.ts`, `AcervoPage.tsx`, configuração de Storage e testes.
+- **Arquivos gerados/afetados:** `next.config.ts`, `src/lib/validation.ts`, `src/lib/validation.test.ts`, `src/lib/supabaseStorage.ts`, `src/lib/acervoReconciliacao.ts`, `src/app/actions/acervo.ts`, `src/app/actions/acervo.test.ts`, `src/app/actions/f1_10_storage_integracao.test.ts`, `src/components/AcervoPage.tsx`, `docs/modernizacao/propostas/F1_10_STORAGE_POLICIES_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_10_ROLLBACK_STORAGE_POLICIES.sql`, `docs/modernizacao/RELATORIO_F1_10.md`, `~/Documents/MEDICINA_2029_F1_10_RELATORIO.md`.
 - **Dependências:** F1.02, F1.03, F1.07 e auditoria das policies externas.
 - **Riscos:** custo de upload; arquivos grandes; compatibilidade serverless; mudanças de policy bloquearem acesso.
-- **Estratégia:** upload presigned/streaming; key aleatória; `upsert:false`; limite server-side; magic bytes; metadados depois da confirmação; bucket privado; URLs curtas; reconciliação objeto↔registro.
-- **Testes necessários:** arquivo válido, não-PDF, oversized, corrompido, duplicado, falha Storage, race e URL expirada.
-- **Critérios de aceite:** sem objeto não há status de sucesso; nenhum arquivo é público; hash/tamanho conferem; falha é recuperável.
-- **Reversão:** manter leitor compatível com keys antigas; rollback de policy ensaiado antes da aplicação.
+- **Estratégia:** upload binário via `FormData`; chave determinística por SHA-256 (`acervo/<sha256>.pdf`); `upsert:false`; limite server-side de 20 MiB (`bodySizeLimit: '28mb'` em `next.config.ts`); cabeçalho `%PDF-`, trailer `%%EOF` e bloqueio de recursos ativos; metadados depois da confirmação; adoção idempotente de objeto órfão existente no reenvio sem exclusão automática; bucket privado; URLs assinadas curtas (`60..900`s); reconciliação read-only objeto↔registro.
+- **Testes necessários:** arquivo válido, não-PDF, truncado sem `%%EOF`, com `/JavaScript`, oversized, duplicado, falha Storage, falha `INSERT`, objeto existente, URL assinada sem autorização e reconciliação.
+- **Critérios de aceite:** sem objeto e metadados confirmados não há status de sucesso; nenhum arquivo é público; hash/tamanho conferem; falha parcial é recuperável sem apagar arquivos existentes.
+- **Reversão:** manter leitor compatível com keys antigas (`acervo/<sha256>_<nome>.pdf`); rollback de policy ensaiado antes da aplicação (`F1_10_ROLLBACK_STORAGE_POLICIES.sql`).
+- **Validação:** `npx tsc --noEmit` (0 erros), `npm run test:run` (27 suítes / 227 testes aprovados, incluindo `f1_10_storage_integracao.test.ts` em PostgreSQL 18.6 descartável PGlite + Storage simulado), `npm run build`, `npx eslint` nos arquivos modificados (0 erros, 0 warnings), `npx drizzle-kit check`, `git diff --check` e suíte RLS `scripts/f1_04/run-rls-validation.mjs` (41/41 cenários aprovados).
+- **Ressalvas:** o pipeline de extração/segmentação/classificação permanece assíncrono em memória até a F1.11 (fila durável); a validação binária síncrona não descomprime streams `/FlateDecode`/`/ObjStm`; as propostas SQL (`F1_04`, `F1_09` e `F1_10`) não foram aplicadas em produção ou no Supabase remoto.
+- **Próximo gate:** F1.11 (Fila durável e pipeline retomável).
 
 ### F1.11 — Fila durável e pipeline retomável
 
+**Status:** concluída em 20/10/2026 como **APROVADA COM RESSALVAS**. O disparo assíncrono efêmero em memória (`void processarArquivoPipeline(...)`) foi substituído por fila PostgreSQL durável (`public.acervo_jobs`, proposta em `F1_11_FILA_INGESTAO_PROPOSTA.sql` com rollback em `F1_11_ROLLBACK_FILA_INGESTAO.sql`) e worker independente (`src/lib/acervoPipelineWorker.ts`) com claim atômico compare-and-swap, lease/heartbeat renovável, recuperação de leases vencidos, retry limitado com backoff exponencial, sanitização de erros e etapas idempotentes/retomáveis (`extracao`, `segmentacao`, `classificacao`, `indexacao`). Sem provedor real de embeddings (F1.12), a etapa `indexacao` nunca declara conclusão fictícia e encerra explicitamente como `falhou` (`EMBEDDING_PROVIDER_UNAVAILABLE`), preservando integralmente páginas, chunks e classificações anteriores.
+
 - **Objetivo:** retirar processamento longo das requisições e tornar cada etapa idempotente.
-- **Arquivos potencialmente afetados:** `acervo.ts`, `curadoria.ts`, novo worker/pg-boss, tabelas de job/gerações e configuração de deploy.
+- **Arquivos gerados/afetados:** `src/lib/acervoPipelineWorker.ts`, `src/lib/supabaseStorage.ts`, `src/app/actions/acervo.ts`, `src/app/actions/acervo.test.ts`, `src/app/actions/authorization.test.ts`, `src/app/actions/f1_10_storage_integracao.test.ts`, `src/app/actions/f1_11_fila_integracao.test.ts`, `docs/modernizacao/propostas/F1_11_FILA_INGESTAO_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_11_ROLLBACK_FILA_INGESTAO.sql`, `docs/modernizacao/RELATORIO_F1_11.md`, `~/Documents/MEDICINA_2029_F1_11_RELATORIO.md`.
 - **Dependências:** F1.10; F1.08.
-- **Riscos:** duplicidade de jobs; worker indisponível; aumento de complexidade operacional.
-- **Estratégia:** publicar job após commit do arquivo; worker separado; estados por etapa; retry/backoff; heartbeat; dead-letter; custo/duração; reprocessar sem apagar versão aprovada.
-- **Testes necessários:** worker morto, retry, job duplicado, retomada, falha por etapa e concorrência.
-- **Critérios de aceite:** request retorna após enfileirar; fechamento do processo não perde job; falha é visível e reprocessável.
-- **Reversão:** pausar consumidores e voltar temporariamente a processamento manual explícito, nunca Promise solta.
+- **Riscos:** duplicidade de jobs; worker indisponível; aumento de complexidade operacional; ativação do runtime antes da migration `F1_11_FILA_INGESTAO_PROPOSTA.sql`.
+- **Estratégia:** publicar job durável em `public.acervo_jobs` após commit de `acervo_arquivos` (`enfileirarJobIngestaoAcervo`), sem fallback silencioso para execução efêmera (`PERSISTENCE_ERROR` explícito se a fila falhar); worker independente (`processarProximoJobAcervo`) com claim atômico, heartbeat/lease (`renovarHeartbeatJobAcervo`, `recuperarJobsComLeaseVencido`), retry com backoff exponencial (`calcularBackoffMs`) e retomada por etapa (`retomarProcessamentoArquivoAcervo`, `obterStatusJobAcervo`).
+- **Ordem obrigatória de ativação:** (1) aplicar `F1_09_INTEGRIDADE_E_IDEMPOTENCIA_PROPOSTA.sql`; (2) aplicar `F1_10_STORAGE_POLICIES_PROPOSTA.sql`; (3) aplicar `F1_11_FILA_INGESTAO_PROPOSTA.sql` (cria `public.acervo_jobs`, constraints `acervo_paginas_arquivo_numero_unique` e `acervo_chunks_arquivo_ordem_unique`, e executa backfill determinístico dos arquivos existentes); (4) publicar a aplicação (`src/app/actions/acervo.ts`) e ativar o runner/cron do worker (`processarProximoJobAcervo`).
+- **Bloqueadores explícitos de publicação:**
+  1. Verificação do conteúdo do objeto adotado após resposta `OBJECT_EXISTS` no fluxo síncrono de upload (além da checagem SHA-256 já executada pelo worker na etapa `extracao` via `STORAGE_HASH_MISMATCH`).
+  2. Homologação das policies Supabase Storage (`F1_10_STORAGE_POLICIES_PROPOSTA.sql`) e do papel de serviço efetivamente usado no ambiente remoto.
+- **Testes necessários:** dois workers concorrentes, execução duplicada, falha em etapa intermediária, retomada após interrupção, lease vencido, retry e limite de tentativas, ownership/autorização, rollback SQL e ausência de sucesso fictício.
+- **Critérios de aceite:** request retorna após enfileirar job persistido; fechamento do processo HTTP não perde job; falha é visível, sanitizada e retomável a partir da etapa pendente sem reexecutar etapas já confirmadas.
+- **Reversão:** pausar consumidores do worker e aplicar `F1_11_ROLLBACK_FILA_INGESTAO.sql` em janela controlada; nunca reintroduzir `Promise` solta em memória.
+- **Validação:** `npx tsc --noEmit` (0 erros), `npm run test:run` (28 suítes / 236 testes aprovados, incluindo 8 cenários de integração em PostgreSQL 18.6 descartável PGlite em `f1_11_fila_integracao.test.ts`), `npm run build`, `npx eslint` nos arquivos modificados (0 erros, 0 warnings), `npx drizzle-kit check`, `git diff --check` e suíte RLS `scripts/f1_04/run-rls-validation.mjs` (41/41 cenários aprovados).
+- **Próximo gate:** F1.12 (IA, proveniência, OCR e busca reais).
 
 ### F1.12 — IA, proveniência, OCR e busca reais
 
@@ -322,16 +342,18 @@ O sistema só deve receber dados reais quando todos os itens abaixo estiverem co
 - operações críticas atômicas/idempotentes;
 - versão crítica do Next.js atualizada;
 - upload privado validado e recuperável;
+- **bloqueador de publicação (F1.10/F1.11):** verificação do conteúdo do objeto adotado após resposta `OBJECT_EXISTS` no fluxo síncrono de upload (complementando a checagem SHA-256 `STORAGE_HASH_MISMATCH` executada pelo worker na etapa `extracao`);
+- **bloqueador de publicação (F1.10/F1.11):** homologação das policies Supabase Storage (`F1_10_STORAGE_POLICIES_PROPOSTA.sql`) e do papel de serviço efetivamente usado no ambiente remoto;
 - backup/restore round-trip aprovado;
 - E2E reais de login, sessão e papéis passando;
 - segredos rotacionados caso haja indício de uso cruzado ou credencial demo reutilizada.
 
 ## 6. Próxima tarefa
 
-**Próxima autorização recomendada: F1.06 — Atualização de dependências críticas e separação de segredos.**
+**Próxima autorização recomendada: F1.12 — IA, proveniência, OCR e busca reais.**
 
-Escopo: atualizar Next.js para remover vulnerabilidades conhecidas, isolar provedores de segredos e impedir uso cruzado de chaves, mantendo a suíte de testes íntegra.
+Escopo: eliminar conteúdo, embeddings e OCR simulados no runtime, exigir `fonteChunkIds` e páginas válidas para publicação, integrar provedor real de embeddings na etapa `indexacao` do worker durável (`gerarEmbeddingReal`) e implementar busca híbrida (`HNSW` + `tsvector` em português).
 
-A F1.04 concluiu a formulação, versionamento e validação isolada do RLS com 100% de sucesso nos 18 cenários da matriz de segurança. A ativação definitiva em produção permanece bloqueada até homologação da role de aplicação e cutover formal.
+A F1.11 concluiu a fila durável PostgreSQL (`public.acervo_jobs` em `F1_11_FILA_INGESTAO_PROPOSTA.sql` e rollback em `F1_11_ROLLBACK_FILA_INGESTAO.sql`) e o worker independente (`src/lib/acervoPipelineWorker.ts`) com claim atômico, lease/heartbeat, recuperação de leases expirados, retry com backoff exponencial e retomada idempotente por etapa (`extracao`, `segmentacao`, `classificacao`, `indexacao`), proibindo fallback silencioso para execução efêmera em memória e mantendo `indexacao` sem conclusão fictícia enquanto não houver provedor real de embeddings. A aplicação das propostas SQL (`F1_04`, `F1_09`, `F1_10` e `F1_11`) no ambiente remoto permanece bloqueada até janela operacional autorizada.
 
 Não iniciar automaticamente. Aguardar aprovação explícita.
