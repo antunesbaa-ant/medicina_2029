@@ -736,6 +736,66 @@ export const concluirSessaoInputSchema = v.object({
   }),
 });
 
+export const acaoPonteiroCicloSchema = v.enum(
+  ['avancar', 'retroceder', 'reiniciar', 'definir'] as const,
+  'Ação do ponteiro do ciclo'
+);
+
+export const atualizarPonteiroCicloInputSchema = v.object(
+  {
+    cicloId: v.uuid('ID do ciclo'),
+    acao: acaoPonteiroCicloSchema,
+    ordemEsperada: v.optional(
+      v.number({ label: 'Ordem esperada', integer: true, min: 1, max: 1000 })
+    ),
+    ordemAlvo: v.optional(
+      v.number({ label: 'Ordem alvo', integer: true, min: 1, max: 1000 })
+    ),
+  },
+  {
+    label: 'Parâmetros de atualização do ponteiro do ciclo',
+    refine: (dados) => {
+      if (dados.acao === 'definir' && dados.ordemAlvo === undefined) {
+        return 'Ordem alvo é obrigatória quando a ação do ponteiro é definir.';
+      }
+      return null;
+    },
+  }
+);
+
+export const obterEstadoSessaoCronometroInputSchema = v.object({
+  sessaoId: v.optional(v.uuid('ID da sessão')),
+  cicloBlocoId: v.optional(v.uuid('ID do bloco do ciclo')),
+  topicoId: v.optional(v.uuid('ID do tópico')),
+});
+
+export const sincronizarCheckpointSessaoInputSchema = v.object(
+  {
+    sessaoId: v.uuid('ID da sessão'),
+    dados: v.object({
+      etapaAtual: etapaAtingidaSchema,
+      etapaEsperada: v.optional(etapaAtingidaSchema),
+      segundosEfetivos: v.number({
+        label: 'Segundos efetivos',
+        integer: true,
+        min: 0,
+        max: 86_400,
+      }),
+      segundosPausa: v.number({
+        label: 'Segundos de pausa',
+        integer: true,
+        min: 0,
+        max: 86_400,
+      }),
+      emPausa: v.optional(v.boolean('Estado de pausa')),
+      notaLivre: v.optional(
+        v.string({ label: 'Nota livre', trim: false, min: 0, max: 5000 })
+      ),
+    }),
+  },
+  { label: 'Parâmetros de sincronização de checkpoint da sessão' }
+);
+
 // 2. FSRS
 export const ratingFsrsSchema = v.enum(
   ['again', 'hard', 'good', 'easy'] as const,

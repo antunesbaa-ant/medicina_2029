@@ -99,6 +99,46 @@ export async function withResponsibleContext<T>(
 }
 
 /**
+ * Aplica o contexto RLS (SET LOCAL via medicina.set_context) a uma transação Drizzle já existente.
+ * Utilizado por Server Actions que gerenciam seu próprio ciclo transacional (ex: advisory locks).
+ */
+export async function applyRlsContext(
+  tx: DrizzleTransaction,
+  perfilId: string,
+  papel: string
+): Promise<void> {
+  if (!perfilId || typeof perfilId !== 'string') {
+    throw new Error('RLS Context Error: perfilId é obrigatório e deve ser uma string UUID válida.');
+  }
+  if (papel !== 'estudante' && papel !== 'responsavel') {
+    throw new Error(`RLS Context Error: papel inválido "${papel}". Esperado "estudante" ou "responsavel".`);
+  }
+
+  if (typeof (tx as unknown as { execute?: unknown }).execute === 'function') {
+    try {
+      const checkResult = await (tx as unknown as { execute: (q: unknown) => Promise<unknown> }).execute(
+        sql`SELECT to_regprocedure('medicina.set_context(uuid, text)') IS NOT NULL AS exists;`
+      );
+      const rows = Array.isArray(checkResult)
+        ? checkResult
+        : (checkResult as { rows?: unknown[] })?.rows ?? [];
+      const firstRow = rows[0] as Record<string, unknown> | undefined;
+      const hasSetContext = Boolean(firstRow?.exists === true || firstRow?.exists === 't');
+
+      if (hasSetContext) {
+        await tx.execute(sql`SELECT medicina.set_context(${perfilId}::uuid, ${papel}::text);`);
+      }
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err ?? '');
+      if (/to_regprocedure/i.test(errMsg)) {
+        return;
+      }
+      throw err;
+    }
+  }
+}
+
+/**
  * Helper de baixo nível que aceita perfilId e papel explicitamente.
  * Destinado EXCLUSIVAMENTE para rotinas internas de manutenção, scripts administrativos
  * e testes de integração de RLS.

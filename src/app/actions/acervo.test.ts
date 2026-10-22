@@ -10,6 +10,7 @@ import {
 import { buscarNoAcervo } from './busca';
 import {
   StorageOperationError,
+  downloadFromSupabaseStorage,
   obterUrlAssinadaSupabase,
   uploadToSupabaseStorage,
 } from '../../lib/supabaseStorage';
@@ -44,6 +45,9 @@ vi.mock('../../lib/supabaseStorage', async (importOriginal) => {
   return {
     ...actual,
     uploadToSupabaseStorage: vi.fn().mockResolvedValue('acervo/mock-file-id.pdf'),
+    downloadFromSupabaseStorage: vi
+      .fn()
+      .mockResolvedValue(Buffer.from('%PDF-1.4\nconteudo de teste\n%%EOF')),
     obterUrlAssinadaSupabase: vi
       .fn()
       .mockResolvedValue('https://storage.example.invalid/storage/v1/object/sign/acervo/mock.pdf?token=abc'),
@@ -211,6 +215,34 @@ describe('Acervo e Ingestão - Server Actions', () => {
           reconciliacao: 'objeto_existente_adotado',
         },
       });
+    });
+
+    it('rejeita adoção após OBJECT_EXISTS quando o conteúdo armazenado no Storage diverge do SHA-256 enviado (F1.13)', async () => {
+      const { db } = await import('../../db');
+      vi.mocked(uploadToSupabaseStorage).mockRejectedValueOnce(
+        new StorageOperationError('OBJECT_EXISTS', 'O objeto já existe no Storage.')
+      );
+      vi.mocked(downloadFromSupabaseStorage).mockResolvedValueOnce(
+        Buffer.from('%PDF-1.4\nconteudo corrompido ou divergente\n%%EOF')
+      );
+
+      const result = await enviarArquivo(
+        DISC_ID,
+        'Livro Corrompido',
+        'livro',
+        1,
+        'enem',
+        'corrompido.pdf',
+        VALID_PDF_BASE64
+      );
+
+      expect(result).toEqual({
+        ok: false,
+        code: 'CONFLICT',
+        message:
+          'O objeto existente no armazenamento diverge do conteúdo enviado (falha de integridade SHA-256). Nenhum cadastro foi realizado.',
+      });
+      expect(db.insert).not.toHaveBeenCalled();
     });
 
     it('rejeita resposta externa inválida do Storage sem inserir metadados nem reportar sucesso (F1.10)', async () => {

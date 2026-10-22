@@ -1,44 +1,61 @@
 'use server';
 
 import { db } from '../../db';
-import { ciclos, cicloBlocos, cicloEstado, disciplinas, topicos } from '../../db/schema';
-import { and, asc, eq, inArray } from 'drizzle-orm';
-import { MOCK_CICLO_ATIVO, MOCK_BLOCOS, MOCK_TOPICOS } from '../../lib/mocks';
+import {
+  ciclos,
+  cicloBlocos,
+  cicloEstado,
+  disciplinas,
+  sessoes,
+  topicos,
+} from '../../db/schema';
+import { and, asc, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm';
 import {
   requireAuthenticatedProfile,
   requireManagedStudentProfile,
-  requireStudentScope
+  requireRole,
+  requireStudentScope,
 } from '../../lib/authorization';
+import { PublicOperationError, logOperationalFailure } from '../../lib/operation-result';
+import { calcularProximaOrdem } from '../../lib/studysystem';
+import { atualizarPonteiroCicloInputSchema, v } from '../../lib/validation';
+import { applyRlsContext } from '../../db/rls-context';
 
 export interface CicloAtivoData {
   ciclo: typeof ciclos.$inferSelect;
-  blocos: Array<typeof cicloBlocos.$inferSelect & {
-    disciplina: typeof disciplinas.$inferSelect;
-  }>;
+  blocos: Array<
+    typeof cicloBlocos.$inferSelect & {
+      disciplina: typeof disciplinas.$inferSelect;
+    }
+  >;
   proximaOrdem: number;
+}
+
+export interface ProgressoSemanalCicloData {
+  concluidosSemana: number;
+  sessaoAbertaId: string | null;
+}
+
+export interface ResultadoAtualizacaoPonteiroCiclo {
+  cicloId: string;
+  proximaOrdem: number;
+  totalBlocos: number;
+  reconciliado: boolean;
 }
 
 export async function obterCicloAtivo(): Promise<CicloAtivoData | null> {
   const estudante = await requireStudentScope();
 
   try {
-    // 1. Busca o ciclo ativo
+    // 1. Busca o ciclo ativo persistido no PostgreSQL (sem fallback para mocks)
     const [cicloAtivo] = await db
       .select()
       .from(ciclos)
-      .where(and(
-        eq(ciclos.ativo, true),
-        eq(ciclos.estudantePerfilId, estudante.id)
-      ))
+      .where(and(eq(ciclos.ativo, true), eq(ciclos.estudantePerfilId, estudante.id)))
       .limit(1);
 
     if (!cicloAtivo) {
-      // Se estiver vazio no banco mas a conexão funcionar
-      return {
-        ciclo: { ...MOCK_CICLO_ATIVO, estudantePerfilId: estudante.id },
-        blocos: MOCK_BLOCOS,
-        proximaOrdem: 1
-      };
+      return null;
     }
 
     // 2. Busca os blocos vinculados ordenados por ordem com as disciplinas correspondentes
@@ -58,53 +75,245 @@ export async function obterCicloAtivo(): Promise<CicloAtivoData | null> {
       .innerJoin(disciplinas, eq(cicloBlocos.disciplinaId, disciplinas.id))
       .orderBy(asc(cicloBlocos.ordem));
 
-    // 3. Busca o estado do ciclo (proxima_ordem)
+    // 3. Busca o estado persistido do ciclo (proxima_ordem)
     const [estado] = await db
       .select()
       .from(cicloEstado)
       .where(eq(cicloEstado.cicloId, cicloAtivo.id))
       .limit(1);
 
-    const proximaOrdem = estado ? estado.proximaOrdem : 1;
+    const ordemBruta = estado ? estado.proximaOrdem : 1;
+    const proximaOrdem =
+      blocos.length > 0 && (ordemBruta < 1 || ordemBruta > blocos.length) ? 1 : ordemBruta;
 
     return {
       ciclo: cicloAtivo,
       blocos,
       proximaOrdem,
     };
-  } catch {
-    console.warn('Banco offline ou indisponível. Usando mock data para ciclo.');
-    // Retorna o ciclo mockado padrão (resiliência frontend)
-    return {
-      ciclo: { ...MOCK_CICLO_ATIVO, estudantePerfilId: estudante.id },
-      blocos: MOCK_BLOCOS,
-      proximaOrdem: 1,
-    };
+  } catch (error) {
+    if (error instanceof PublicOperationError) throw error;
+    logOperationalFailure('ciclo.obter_ativo', 'persistence');
+    throw new PublicOperationError(
+      'PERSISTENCE_ERROR',
+      'Não foi possível sincronizar o ciclo ativo com o servidor.'
+    );
   }
 }
 
-export async function obterTopicosPorDisciplina(disciplinaId: string) {
+export async function obterTopicosPorDisciplina(
+  disciplinaId: string
+): Promise<Array<typeof topicos.$inferSelect>> {
   await requireAuthenticatedProfile();
+  const disciplinaIdValido = v.uuid('ID da disciplina').parse(disciplinaId);
 
   try {
-    const list = await db
+    return await db
       .select()
       .from(topicos)
-      .where(eq(topicos.disciplinaId, disciplinaId))
+      .where(eq(topicos.disciplinaId, disciplinaIdValido))
       .orderBy(asc(topicos.ordem));
-    
-    if (list.length > 0) return list;
-    return MOCK_TOPICOS[disciplinaId] || [];
-  } catch {
-    return MOCK_TOPICOS[disciplinaId] || [];
+  } catch (error) {
+    if (error instanceof PublicOperationError) throw error;
+    logOperationalFailure('ciclo.topicos_por_disciplina', 'persistence');
+    throw new PublicOperationError(
+      'PERSISTENCE_ERROR',
+      'Não foi possível carregar os tópicos da disciplina.'
+    );
   }
 }
 
-export async function iniciarCicloEstudos(): Promise<{ sucesso: boolean; mensagem: string; cicloId?: string }> {
+export async function obterProgressoSemanalCiclo(): Promise<ProgressoSemanalCicloData> {
+  const estudante = await requireStudentScope();
+
+  try {
+    const seteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const sessoesConcluidasRecentes = await db
+      .select({ id: sessoes.id })
+      .from(sessoes)
+      .where(
+        and(
+          eq(sessoes.perfilId, estudante.id),
+          eq(sessoes.concluida, true),
+          gte(sessoes.encerradaEm, seteDiasAtras)
+        )
+      );
+
+    const [sessaoAberta] = await db
+      .select({ id: sessoes.id })
+      .from(sessoes)
+      .where(and(eq(sessoes.perfilId, estudante.id), isNull(sessoes.encerradaEm)))
+      .limit(1);
+
+    return {
+      concluidosSemana: sessoesConcluidasRecentes.length,
+      sessaoAbertaId: sessaoAberta?.id ?? null,
+    };
+  } catch (error) {
+    if (error instanceof PublicOperationError) throw error;
+    logOperationalFailure('ciclo.progresso_semanal', 'persistence');
+    throw new PublicOperationError(
+      'PERSISTENCE_ERROR',
+      'Não foi possível carregar o progresso semanal confirmado no banco.'
+    );
+  }
+}
+
+export async function atualizarPonteiroCiclo(
+  cicloId: string,
+  acao: 'avancar' | 'retroceder' | 'reiniciar' | 'definir',
+  opcoes?: { ordemEsperada?: number; ordemAlvo?: number }
+): Promise<ResultadoAtualizacaoPonteiroCiclo> {
+  const perfil = await requireRole('estudante');
+  const validado = atualizarPonteiroCicloInputSchema.parse({
+    cicloId,
+    acao,
+    ...(opcoes ?? {}),
+  });
+
+  try {
+    return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
+
+      // Serializa atualizações concorrentes de ponteiro do mesmo ciclo (clique duplo / multiaba)
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtextextended(${validado.cicloId}::text, 0));`
+      );
+
+      const [cicloAlvo] = await tx
+        .select({
+          id: ciclos.id,
+          ativo: ciclos.ativo,
+          estudantePerfilId: ciclos.estudantePerfilId,
+        })
+        .from(ciclos)
+        .where(
+          and(
+            eq(ciclos.id, validado.cicloId),
+            eq(ciclos.ativo, true),
+            or(eq(ciclos.estudantePerfilId, perfil.id), isNull(ciclos.estudantePerfilId))
+          )
+        )
+        .limit(1);
+
+      if (
+        !cicloAlvo ||
+        (cicloAlvo.estudantePerfilId && cicloAlvo.estudantePerfilId !== perfil.id)
+      ) {
+        throw new PublicOperationError(
+          'NOT_FOUND',
+          'Ciclo ativo não encontrado ou acesso não permitido.'
+        );
+      }
+
+      const blocosDoCiclo = await tx
+        .select({ id: cicloBlocos.id, ordem: cicloBlocos.ordem })
+        .from(cicloBlocos)
+        .where(eq(cicloBlocos.cicloId, validado.cicloId))
+        .orderBy(asc(cicloBlocos.ordem));
+
+      const totalBlocos = blocosDoCiclo.length;
+      if (totalBlocos <= 0) {
+        throw new PublicOperationError(
+          'VALIDATION_ERROR',
+          'O ciclo ativo não possui blocos configurados.'
+        );
+      }
+
+      const [estadoAtualRow] = await tx
+        .select({ proximaOrdem: cicloEstado.proximaOrdem })
+        .from(cicloEstado)
+        .where(eq(cicloEstado.cicloId, validado.cicloId))
+        .limit(1);
+
+      const ordemAtualBruta = estadoAtualRow?.proximaOrdem ?? 1;
+      const ordemAtual =
+        ordemAtualBruta < 1 || ordemAtualBruta > totalBlocos ? 1 : ordemAtualBruta;
+
+      // Se a aba partiu de uma ordemEsperada já superada por outra aba/dispositivo,
+      // converge para a ordem persistida no servidor sem aplicar deslocamento duplicado.
+      if (validado.ordemEsperada !== undefined && validado.ordemEsperada !== ordemAtual) {
+        return {
+          cicloId: validado.cicloId,
+          proximaOrdem: ordemAtual,
+          totalBlocos,
+          reconciliado: true,
+        };
+      }
+
+      let novaOrdem: number;
+      switch (validado.acao) {
+        case 'reiniciar':
+          novaOrdem = 1;
+          break;
+        case 'avancar':
+          novaOrdem = calcularProximaOrdem(ordemAtual, totalBlocos);
+          break;
+        case 'retroceder':
+          novaOrdem = ordemAtual <= 1 ? totalBlocos : ordemAtual - 1;
+          break;
+        case 'definir': {
+          const alvo = validado.ordemAlvo!;
+          if (alvo < 1 || alvo > totalBlocos) {
+            throw new PublicOperationError(
+              'VALIDATION_ERROR',
+              `A ordem do bloco deve estar entre 1 e ${totalBlocos}.`
+            );
+          }
+          novaOrdem = alvo;
+          break;
+        }
+      }
+
+      const [ponteiroPersistido] = await tx
+        .insert(cicloEstado)
+        .values({ cicloId: validado.cicloId, proximaOrdem: novaOrdem })
+        .onConflictDoUpdate({
+          target: cicloEstado.cicloId,
+          set: { proximaOrdem: novaOrdem },
+        })
+        .returning({
+          cicloId: cicloEstado.cicloId,
+          proximaOrdem: cicloEstado.proximaOrdem,
+        });
+
+      if (!ponteiroPersistido) {
+        logOperationalFailure('ciclo.ponteiro_without_returning', 'persistence');
+        throw new PublicOperationError(
+          'PERSISTENCE_ERROR',
+          'Não foi possível confirmar a atualização do ponteiro do ciclo.'
+        );
+      }
+
+      return {
+        cicloId: ponteiroPersistido.cicloId,
+        proximaOrdem: ponteiroPersistido.proximaOrdem,
+        totalBlocos,
+        reconciliado: false,
+      };
+    });
+  } catch (error) {
+    if (error instanceof PublicOperationError) throw error;
+    logOperationalFailure('ciclo.atualizar_ponteiro', 'persistence');
+    throw new PublicOperationError(
+      'PERSISTENCE_ERROR',
+      'Não foi possível atualizar o ponteiro do ciclo.'
+    );
+  }
+}
+
+export async function iniciarCicloEstudos(): Promise<{
+  sucesso: boolean;
+  mensagem: string;
+  cicloId?: string;
+}> {
   const estudante = await requireManagedStudentProfile();
 
   try {
     return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, estudante.id, estudante.papel);
+
       // 1. Set all existing cycles to active=false
       await tx
         .update(ciclos)
@@ -129,9 +338,7 @@ export async function iniciarCicloEstudos(): Promise<{ sucesso: boolean; mensage
       }
 
       // 3. Fetch all disciplines to map their IDs
-      const listDisciplinas = await tx
-        .select()
-        .from(disciplinas);
+      const listDisciplinas = await tx.select().from(disciplinas);
 
       if (listDisciplinas.length === 0) {
         throw new Error('Nenhuma disciplina cadastrada no banco de dados para criar os blocos.');
@@ -139,19 +346,23 @@ export async function iniciarCicloEstudos(): Promise<{ sucesso: boolean; mensage
 
       // Helper function to map discipline name to its ID in db
       const obterDisciplinaId = (nome: string): string => {
-        const nomeNorm = nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const nomeNorm = nome
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '');
         for (const d of listDisciplinas) {
-          const dbNomeNorm = d.nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+          const dbNomeNorm = d.nome
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
           if (dbNomeNorm === nomeNorm) {
             return d.id;
           }
         }
-        // Fallback: return the first discipline if no match
         return listDisciplinas[0].id;
       };
 
       // 4. Balanced 28 study blocks curriculum (at least 50% question-solving / error revision)
-      // We will have exactly 15 blocks as 'questoes' or 'caderno_erros' (53.6%)
       const blocosConfig = [
         { nomeDisc: 'Matemática', tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50 },
         { nomeDisc: 'Biologia', tipo: 'conteudo' as const, estiloAlvo: 'enem' as const, duracaoMin: 50 },
@@ -193,7 +404,7 @@ export async function iniciarCicloEstudos(): Promise<{ sucesso: boolean; mensage
           disciplinaId,
           tipo: config.tipo,
           estiloAlvo: config.estiloAlvo,
-          duracaoMin: config.duracaoMin
+          duracaoMin: config.duracaoMin,
         });
       }
 
@@ -206,14 +417,14 @@ export async function iniciarCicloEstudos(): Promise<{ sucesso: boolean; mensage
       return {
         sucesso: true,
         mensagem: 'Novo ciclo de estudos ativo e fila com 28 blocos configurada com sucesso!',
-        cicloId: novoCiclo.id
+        cicloId: novoCiclo.id,
       };
     });
   } catch (error) {
     console.error('Erro ao iniciar ciclo de estudos:', error);
     return {
       sucesso: false,
-      mensagem: 'Erro interno ao iniciar ciclo de estudos.'
+      mensagem: 'Erro interno ao iniciar ciclo de estudos.',
     };
   }
 }
@@ -223,6 +434,8 @@ export async function resetarPlanejamento(): Promise<{ sucesso: boolean; mensage
 
   try {
     return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, estudante.id, estudante.papel);
+
       const ciclosDaEstudante = await tx
         .select({ id: ciclos.id })
         .from(ciclos)
@@ -243,16 +456,14 @@ export async function resetarPlanejamento(): Promise<{ sucesso: boolean; mensage
 
       return {
         sucesso: true,
-        mensagem: 'Planejamento resetado com sucesso. Nenhum ciclo está ativo.'
+        mensagem: 'Planejamento resetado com sucesso. Nenhum ciclo está ativo.',
       };
     });
   } catch (error) {
     console.error('Erro ao resetar planejamento:', error);
     return {
       sucesso: false,
-      mensagem: 'Erro interno ao resetar planejamento.'
+      mensagem: 'Erro interno ao resetar planejamento.',
     };
   }
 }
-
-

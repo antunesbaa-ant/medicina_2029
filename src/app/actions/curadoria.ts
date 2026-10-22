@@ -30,6 +30,7 @@ import {
   enfileirarGeracaoInputSchema,
   curarItemInputSchema,
 } from '../../lib/validation';
+import { applyRlsContext } from '../../db/rls-context';
 
 interface GeracaoConfirmada {
   itensGerados: number;
@@ -63,6 +64,7 @@ export async function enfileirarGeracaoDeArtefatos(
     const [arquivo] = await db
       .select({
         id: acervoArquivos.id,
+        titulo: acervoArquivos.titulo,
         enviadoPor: acervoArquivos.enviadoPor,
         statusProcessamento: acervoArquivos.statusProcessamento,
       })
@@ -87,7 +89,7 @@ export async function enfileirarGeracaoDeArtefatos(
       .select({ itensGerados: geracoes.itensGerados })
       .from(geracoes)
       .where(and(
-        eq(geracoes.arquivoIds, [arquivoIdValido]),
+        sql`${geracoes.arquivoIds} = ${JSON.stringify([arquivoIdValido])}::jsonb`,
         eq(geracoes.status, 'concluida')
       ))
       .limit(1);
@@ -99,9 +101,13 @@ export async function enfileirarGeracaoDeArtefatos(
       });
     }
 
-    // 1. Busca os chunks do arquivo que possuem tópicos associados
+    // 1. Busca os chunks do arquivo que possuem tópicos associados e metadados de proveniência
     const chunks = await db
       .select({
+        id: acervoChunks.id,
+        paginaInicial: acervoChunks.paginaInicial,
+        paginaFinal: acervoChunks.paginaFinal,
+        ordem: acervoChunks.ordem,
         texto: acervoChunks.texto,
         topicoId: acervoChunks.topicoId,
         topicoNome: topicos.nome,
@@ -115,19 +121,42 @@ export async function enfileirarGeracaoDeArtefatos(
       return operationFailure('NOT_FOUND', 'Não há conteúdo classificado disponível para geração.');
     }
 
-    // 2. Agrupa o texto por tópico
-    const chunksPorTopico = new Map<string, { texto: string; topicoNome: string; disciplinaId: string }>();
+    // 2. Agrupa o texto e a proveniência (chunkIds e páginas) por tópico
+    const chunksPorTopico = new Map<
+      string,
+      {
+        texto: string;
+        topicoNome: string;
+        disciplinaId: string;
+        chunkIds: string[];
+        paginaMin: number;
+        paginaMax: number;
+      }
+    >();
     for (const c of chunks) {
-      if (c.topicoId) {
+      if (c.topicoId && typeof c.texto === 'string' && c.texto.trim().length > 0) {
+        const pagIni = typeof c.paginaInicial === 'number' ? c.paginaInicial : 1;
+        const pagFim = typeof c.paginaFinal === 'number' ? c.paginaFinal : pagIni;
         const prev = chunksPorTopico.get(c.topicoId) || {
           texto: '',
           topicoNome: c.topicoNome,
           disciplinaId: c.disciplinaId,
+          chunkIds: [],
+          paginaMin: pagIni,
+          paginaMax: pagFim,
         };
+        const nextChunkIds =
+          typeof c.id === 'string' && c.id.trim().length > 0 && !prev.chunkIds.includes(c.id)
+            ? [...prev.chunkIds, c.id]
+            : prev.chunkIds;
+
         chunksPorTopico.set(c.topicoId, {
-          texto: prev.texto + '\n' + c.texto,
+          texto: prev.texto ? `${prev.texto}\n${c.texto}` : c.texto,
           topicoNome: c.topicoNome,
           disciplinaId: c.disciplinaId,
+          chunkIds: nextChunkIds,
+          paginaMin: Math.min(prev.paginaMin, pagIni),
+          paginaMax: Math.max(prev.paginaMax, pagFim),
         });
       }
     }
@@ -140,14 +169,27 @@ export async function enfileirarGeracaoDeArtefatos(
     const gerados: Array<{
       topicoId: string;
       disciplinaId: string;
+      chunkIds: string[];
+      paginaMin: number;
+      paginaMax: number;
       artefatos: Awaited<ReturnType<typeof gerarArtefatosGemini>>;
     }> = [];
     for (const [topicoId, data] of chunksPorTopico.entries()) {
       try {
+        const artefatos = await gerarArtefatosGemini(data.texto, data.topicoNome);
+        if (data.chunkIds.length === 0) {
+          return operationFailure(
+            'CONFLICT',
+            'Os trechos selecionados não possuem identificadores de proveniência (chunkIds) válidos.'
+          );
+        }
         gerados.push({
           topicoId,
           disciplinaId: data.disciplinaId,
-          artefatos: await gerarArtefatosGemini(data.texto, data.topicoNome),
+          chunkIds: data.chunkIds,
+          paginaMin: data.paginaMin,
+          paginaMax: data.paginaMax,
+          artefatos,
         });
       } catch (error) {
         if (error instanceof GeminiGenerationError) {
@@ -162,6 +204,8 @@ export async function enfileirarGeracaoDeArtefatos(
     }
 
     return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, responsavel.id, responsavel.papel);
+
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`curadoria-geracao:${arquivoIdValido}`}::text, 0))`
       );
@@ -170,7 +214,7 @@ export async function enfileirarGeracaoDeArtefatos(
         .select({ itensGerados: geracoes.itensGerados })
         .from(geracoes)
         .where(and(
-          eq(geracoes.arquivoIds, [arquivoIdValido]),
+          sql`${geracoes.arquivoIds} = ${JSON.stringify([arquivoIdValido])}::jsonb`,
           eq(geracoes.status, 'concluida')
         ))
         .limit(1);
@@ -182,10 +226,15 @@ export async function enfileirarGeracaoDeArtefatos(
         });
       }
 
+      const todosChunkIds = Array.from(new Set(gerados.flatMap((g) => g.chunkIds)));
       let itensGerados = 0;
-      for (const { topicoId, disciplinaId, artefatos } of gerados) {
 
-        // A. Gravar Resumo
+      for (const { topicoId, disciplinaId, chunkIds, paginaMin, paginaMax, artefatos } of gerados) {
+        const fonteRastreavel = arquivo.titulo
+          ? `Acervo: ${arquivo.titulo} (p. ${paginaMin === paginaMax ? paginaMin : `${paginaMin}-${paginaMax}`})`.slice(0, 100)
+          : 'Google Gemini';
+
+        // A. Gravar Resumo (sempre como rascunho com proveniência fonteChunkIds)
         const [resumo] = await tx
           .insert(materiais)
           .values({
@@ -195,7 +244,8 @@ export async function enfileirarGeracaoDeArtefatos(
             tipo: 'resumo',
             tempoLeituraMin: artefatos.resumo.tempoLeituraMin,
             status: 'rascunho',
-            origem: 'gerado'
+            origem: 'gerado',
+            fonteChunkIds: chunkIds,
           })
           .returning({ id: materiais.id });
         if (!resumo) throw new Error('material_insert_not_confirmed');
@@ -210,7 +260,7 @@ export async function enfileirarGeracaoDeArtefatos(
         if (!filaResumo) throw new Error('queue_insert_not_confirmed');
         itensGerados++;
 
-        // B. Gravar Flashcards
+        // B. Gravar Flashcards (sempre como rascunho com proveniência fonteChunkIds)
         for (const fc of artefatos.flashcards) {
           const [card] = await tx
             .insert(perguntasAtivas)
@@ -219,7 +269,8 @@ export async function enfileirarGeracaoDeArtefatos(
               pergunta: fc.pergunta,
               resposta: fc.resposta,
               estilo: 'enem',
-              status: 'rascunho'
+              status: 'rascunho',
+              fonteChunkIds: chunkIds,
             })
             .returning({ id: perguntasAtivas.id });
           if (!card) throw new Error('flashcard_insert_not_confirmed');
@@ -235,13 +286,13 @@ export async function enfileirarGeracaoDeArtefatos(
           itensGerados++;
         }
 
-        // C. Gravar Questoes
+        // C. Gravar Questoes (sempre como rascunho com proveniência arquivoOrigemId + fonteChunkIds)
         for (const q of artefatos.questoes) {
           const [questao] = await tx
             .insert(questoes)
             .values({
               procedencia: 'gerada',
-              fonte: 'Google Gemini',
+              fonte: fonteRastreavel,
               disciplinaId,
               estilo: 'enem',
               enunciado: q.enunciado,
@@ -249,7 +300,8 @@ export async function enfileirarGeracaoDeArtefatos(
               gabarito: q.gabarito,
               resolucao: q.resolucao,
               status: 'rascunho',
-              arquivoOrigemId: arquivoIdValido
+              arquivoOrigemId: arquivoIdValido,
+              fonteChunkIds: chunkIds,
             })
             .returning({ id: questoes.id });
           if (!questao) throw new Error('question_insert_not_confirmed');
@@ -270,9 +322,9 @@ export async function enfileirarGeracaoDeArtefatos(
         tipoArtefato: 'lote_curadoria',
         topicoId: gerados[0].topicoId,
         arquivoIds: [arquivoIdValido],
-        chunkIds: [],
-        modelo: 'gemini',
-        promptVersao: 'f1.07',
+        chunkIds: todosChunkIds,
+        modelo: 'gemini-2.5-flash',
+        promptVersao: 'f1.12',
         custoTokens: 0,
         iniciadaEm: new Date(),
         concluidaEm: new Date(),
@@ -383,6 +435,8 @@ export async function curarItem(
 
   try {
     return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, responsavel.id, responsavel.papel);
+
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`curadoria-decisao:${curadoriaIdValido}`}::text, 0))`
       );
@@ -483,7 +537,14 @@ export async function curarItem(
             .limit(1);
           if (!flashcard) throw new Error('approved_flashcard_not_found');
 
-          // Criar card de repetição FSRS
+          if (Array.isArray(flashcard.fonteChunkIds) && flashcard.fonteChunkIds.length === 0) {
+            return operationFailure(
+              'CONFLICT',
+              'O flashcard gerado não possui proveniência verificável (fonteChunkIds) e não pode ser aprovado.'
+            );
+          }
+
+          // Criar card de repetição FSRS preservando a proveniência original (fonteChunkIds)
           const [cardCriado] = await tx.insert(cards).values({
             perfilId: estudante!.id,
             topicoId: item.topicoId,
@@ -492,6 +553,7 @@ export async function curarItem(
             origem: 'gerado',
             status: 'aprovado',
             suspenso: false,
+            fonteChunkIds: Array.isArray(flashcard.fonteChunkIds) ? flashcard.fonteChunkIds : null,
             due: new Date(), // Vence hoje imediatamente
             stability: 1.0,
             difficulty: 5.0,

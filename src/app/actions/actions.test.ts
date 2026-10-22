@@ -161,15 +161,13 @@ describe('Server Actions - Fase 1', () => {
   });
 
   describe('obterCicloAtivo()', () => {
-    it('deve retornar o mock resiliente se não houver ciclo ativo no banco', async () => {
+    it('deve retornar null se não houver ciclo ativo no banco (sem fallback mockado — F1.14)', async () => {
       selectMockedOutputs = [
         [], // Busca do ciclo ativo retorna vazio
       ];
 
       const resultado = await obterCicloAtivo();
-      expect(resultado).not.toBeNull();
-      expect(resultado?.ciclo.nome).toContain('Ciclo Padrão');
-      expect(resultado?.blocos.length).toBeGreaterThan(0);
+      expect(resultado).toBeNull();
       expect(selectCallsCount).toBe(1);
       expect(whereValues[0]).toEqual(and(
         eq(ciclos.ativo, true),

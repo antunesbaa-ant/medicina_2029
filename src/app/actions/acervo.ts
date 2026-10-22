@@ -9,6 +9,7 @@ import {
   MAX_SIGNED_URL_SECONDS,
   MIN_SIGNED_URL_SECONDS,
   StorageOperationError,
+  downloadFromSupabaseStorage,
   obterUrlAssinadaSupabase,
   uploadToSupabaseStorage,
 } from '../../lib/supabaseStorage';
@@ -143,9 +144,31 @@ export async function enviarArquivo(
       }
     } catch (error) {
       if (error instanceof StorageOperationError && error.code === 'OBJECT_EXISTS') {
-        // O objeto com o mesmo SHA-256 já existe no Storage, mas não havia registro correspondente
-        // no banco (ex.: tentativa anterior cujo upload concluiu e o INSERT falhou).
-        // Adota o objeto determinístico existente sem sobrescrevê-lo nem apagá-lo.
+        // F1.13: Verifica imediatamente a integridade (tamanho e SHA-256) do objeto
+        // pré-existente no Storage antes de adotá-lo no banco de dados.
+        let bytesArmazenados: Buffer;
+        try {
+          bytesArmazenados = await downloadFromSupabaseStorage(filePath);
+        } catch {
+          logOperationalFailure('acervo.upload.storage_adopt_verify', 'external_service');
+          return operationFailure(
+            'EXTERNAL_SERVICE_ERROR',
+            'O arquivo já consta no armazenamento, mas não foi possível verificar sua integridade. Nenhum processamento foi iniciado.'
+          );
+        }
+
+        const hashArmazenado = crypto.createHash('sha256').update(bytesArmazenados).digest('hex');
+        if (
+          bytesArmazenados.length !== fileBuffer.length ||
+          hashArmazenado.toLowerCase() !== hash.toLowerCase()
+        ) {
+          logOperationalFailure('acervo.upload.storage_hash_mismatch', 'external_service');
+          return operationFailure(
+            'CONFLICT',
+            'O objeto existente no armazenamento diverge do conteúdo enviado (falha de integridade SHA-256). Nenhum cadastro foi realizado.'
+          );
+        }
+
         reutilizouObjetoExistente = true;
       } else if (error instanceof StorageOperationError && error.code === 'INVALID_RESPONSE') {
         logOperationalFailure('acervo.upload.storage_invalid_response', 'external_service');

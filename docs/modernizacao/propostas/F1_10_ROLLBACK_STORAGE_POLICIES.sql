@@ -11,6 +11,7 @@ BEGIN;
 
 DROP POLICY IF EXISTS acervo_objects_responsavel_delete_unlinked ON storage.objects;
 DROP POLICY IF EXISTS acervo_objects_responsavel_insert ON storage.objects;
+DROP POLICY IF EXISTS acervo_objects_worker_select ON storage.objects;
 DROP POLICY IF EXISTS acervo_objects_responsavel_select ON storage.objects;
 DROP POLICY IF EXISTS acervo_buckets_select_authenticated ON storage.buckets;
 

@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  GeminiEmbeddingError,
   GeminiGenerationError,
+  GeminiOcrError,
+  extrairTextoOcrGemini,
   gerarArtefatosGemini,
+  gerarEmbeddingGemini,
   gerarMockArtefatos,
 } from './gemini';
 
@@ -119,5 +123,88 @@ describe('gerarArtefatosGemini — contratos de falha F1.07', () => {
 
   it('mantém fixture determinística disponível apenas por chamada explícita de teste', () => {
     expect(gerarMockArtefatos('Texto', 'Tópico').resumo.titulo).toContain('demonstração');
+  });
+
+  describe('gerarEmbeddingGemini (F1.12)', () => {
+    it('gera e normaliza vetor de 1536 dimensões enviando chave somente via cabeçalho', async () => {
+      process.env.GEMINI_API_KEY = 'segredo-embedding-gemini';
+      const rawVec = Array.from({ length: 1536 }, (_, i) => (i === 0 ? 3 : i === 1 ? 4 : 0));
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ embedding: { values: rawVec } }),
+      } as Response);
+
+      const vec = await gerarEmbeddingGemini('Mitocôndrias e respiração celular');
+      expect(vec).toHaveLength(1536);
+      expect(vec[0]).toBeCloseTo(0.6, 5);
+      expect(vec[1]).toBeCloseTo(0.8, 5);
+
+      const [url, options] = fetchSpy.mock.calls[0]!;
+      expect(String(url)).not.toContain('segredo-embedding-gemini');
+      expect((options?.headers as Record<string, string>)['x-goog-api-key']).toBe('segredo-embedding-gemini');
+    });
+
+    it('rejeita embedding com dimensão incompatível (DIMENSION_MISMATCH) quando diferente de 1536', async () => {
+      process.env.GEMINI_API_KEY = 'segredo-embedding-gemini';
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ embedding: { values: [0.1, 0.2, 0.3] } }),
+      } as Response);
+
+      await expect(gerarEmbeddingGemini('Texto')).rejects.toMatchObject({
+        name: 'GeminiEmbeddingError',
+        code: 'DIMENSION_MISMATCH',
+        retryable: false,
+      });
+    });
+
+    it('falha explicitamente em chave ausente, texto vazio, HTTP error e timeout', async () => {
+      await expect(gerarEmbeddingGemini('Texto')).rejects.toBeInstanceOf(GeminiEmbeddingError);
+
+      process.env.GEMINI_API_KEY = 'segredo-embedding-gemini';
+      await expect(gerarEmbeddingGemini('   ')).rejects.toMatchObject({
+        code: 'EMPTY_INPUT',
+        retryable: false,
+      });
+
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: false, status: 429 } as Response);
+      await expect(gerarEmbeddingGemini('Texto')).rejects.toMatchObject({
+        code: 'HTTP_ERROR',
+        retryable: true,
+      });
+    });
+  });
+
+  describe('extrairTextoOcrGemini (F1.12)', () => {
+    it('extrai texto literal por página e preserva páginas em branco sem inventar conteúdo', async () => {
+      process.env.GEMINI_API_KEY = 'segredo-ocr-gemini';
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+        geminiResponse(
+          JSON.stringify({
+            paginas: [
+              { numero: 2, texto: '', confianca: 0 },
+              { numero: 1, texto: 'Texto extraído via OCR na página 1.', confianca: 0.93 },
+            ],
+          })
+        )
+      );
+
+      const paginas = await extrairTextoOcrGemini(Buffer.from('%PDF-1.4\n%%EOF'), [1, 2]);
+      expect(paginas).toEqual([
+        { numero: 1, texto: 'Texto extraído via OCR na página 1.', confianca: 0.93 },
+        { numero: 2, texto: '', confianca: 0 },
+      ]);
+    });
+
+    it('propaga falha de OCR sem inventar páginas', async () => {
+      process.env.GEMINI_API_KEY = 'segredo-ocr-gemini';
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({ ok: false, status: 502 } as Response);
+
+      await expect(extrairTextoOcrGemini(Buffer.from('%PDF-1.4\n%%EOF'))).rejects.toBeInstanceOf(
+        GeminiOcrError
+      );
+    });
   });
 });

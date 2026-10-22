@@ -12,6 +12,7 @@ import {
   type OperationErrorCode,
 } from '../../lib/operation-result';
 import { registrarRevisaoCardInputSchema } from '../../lib/validation';
+import { applyRlsContext } from '../../db/rls-context';
 
 // 1. Obter Cards Due (Vencidos) do Estudante
 export async function obterCardsParaRevisao() {
@@ -88,6 +89,8 @@ export async function registrarRevisaoCard(
 
   try {
     return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
+
       // O lock impede que duas abas calculem o próximo estado a partir da
       // mesma versão do card.
       const [cardDb] = await tx

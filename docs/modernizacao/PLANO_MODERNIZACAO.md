@@ -4,7 +4,7 @@
 
 **Princípio:** menor alteração segura possível; sem refatoração ampla sem necessidade
 
-**Estado:** F1.02 a F1.10 executadas; F1.03-M reprovou a proposta monolítica; F1.03-R, F1.07, F1.08, F1.09 e F1.10 foram aprovadas com ressalvas; nenhuma etapa desta sequência acessou ou alterou produção
+**Estado:** F1.02 a F1.16 executadas; F1.03-M reprovou a proposta monolítica; F1.03-R, F1.07, F1.08, F1.09, F1.10, F1.11, F1.12, F1.13, F1.14, F1.15 e F1.16 foram aprovadas; nenhuma etapa desta sequência acessou ou alterou produção
 
 ## 1. Estratégia geral
 
@@ -45,11 +45,13 @@ F1.11 Fila durável do pipeline
           ↓
 F1.12 IA, fontes e recuperação real
           ↓
-F1.13 Estado server-side do ciclo/cronômetro
+F1.13 Consolidação técnica e preparação para homologação (inserida antes da homologação de banco/worker/IA)
           ↓
-F1.14 Backup completo e recuperação
+F1.14 Estado server-side do ciclo/cronômetro (anteriormente F1.13; prioridade preservada)
           ↓
-F1.15 Testes de segurança/E2E e operação
+F1.15 Backup completo e recuperação (anteriormente F1.14; prioridade preservada)
+          ↓
+F1.16 Testes de segurança/E2E e operação (anteriormente F1.15; prioridade preservada)
 ```
 
 ## 3. Tarefas propostas
@@ -277,47 +279,100 @@ F1.15 Testes de segurança/E2E e operação
 
 ### F1.12 — IA, proveniência, OCR e busca reais
 
+**Status:** concluída em 20/10/2026 como **APROVADA COM RESSALVAS**. Os placeholders de OCR, embeddings e busca semântica foram substituídos por integrações reais, configuráveis e verificáveis (`extrairTextoOcrGemini` com `gemini-2.5-flash` para PDFs digitalizados, `gerarEmbeddingGemini`/`gerarEmbeddingReal` com `gemini-embedding-001` em 1536 dimensões normalizadas L2 compatíveis com `vector(1536)`, e `buscaHibridaAcervo` com `pgvector` `<=>` + `to_tsvector('portuguese', ...)` filtrando estritamente por ownership do acervo). A curadoria humana obrigatória e a proveniência verificável (`fonteChunkIds`, `arquivoOrigemId`, `fonte`, `geracoes.chunkIds`) foram endurecidas em `curadoria.ts` e na proposta SQL reversível `F1_12_BUSCA_VETORIAL_E_INDICES_PROPOSTA.sql` (com rollback `F1_12_ROLLBACK_BUSCA_VETORIAL_E_INDICES.sql`).
+
 - **Objetivo:** eliminar conteúdo/embeddings/OCR simulados no runtime e cumprir o portão de fonte.
-- **Arquivos potencialmente afetados:** `gemini.ts`, `ingestion.ts`, `curadoria.ts`, schema de gerações/chunks, migrations de índices.
+- **Arquivos gerados/afetados:** `src/lib/gemini.ts`, `src/lib/gemini.test.ts`, `src/lib/ingestion.ts`, `src/lib/ingestion.test.ts`, `src/lib/acervoPipelineWorker.ts`, `src/lib/env.ts`, `.env.example`, `src/app/actions/busca.ts`, `src/app/actions/curadoria.ts`, `src/app/actions/f1_12_ia_busca_integracao.test.ts`, `docs/modernizacao/propostas/F1_12_BUSCA_VETORIAL_E_INDICES_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_12_ROLLBACK_BUSCA_VETORIAL_E_INDICES.sql`, `docs/modernizacao/RELATORIO_F1_12.md`, `~/Documents/MEDICINA_2029_F1_12_RELATORIO.md`.
 - **Dependências:** F1.11 e F1.09.
-- **Riscos:** custo de API, mudança de ranking, reindexação, conteúdo legado sem fonte.
-- **Estratégia:** falhar fechado sem provedor; resposta validada por schema; `fonteChunkIds` obrigatório; embeddings reais versionados; HNSW + `tsvector` pt; OCR real e visão abaixo do limiar; bloquear publicação sem fonte.
-- **Testes necessários:** provider ausente, JSON inválido, prompt injection no documento, item sem fonte, relevância conhecida, página correta e OCR de amostra.
-- **Critérios de aceite:** nenhum mock entra em produção; todo item publicado aponta para chunks/páginas; busca híbrida supera baseline definido.
-- **Reversão:** manter índice anterior até validação; feature flag para desligar geração, não para publicar conteúdo simulado.
+- **Riscos:** custo de API (`gemini-embedding-001` por chunk na indexação e por consulta em `buscarNoAcervo`, além de `gemini-2.5-flash` em PDFs digitalizados sem camada nativa de texto); limite de tamanho inline do OCR multimodal (`inline_data` em base64 para documentos até 20 MiB); necessidade de aplicar `F1_12_BUSCA_VETORIAL_E_INDICES_PROPOSTA.sql` para criar os índices HNSW e GIN FTS em produção.
+- **Estratégia:** falhar fechado sem provedor (`GeminiEmbeddingError` / `GeminiOcrError` / `GeminiGenerationError`); preservar numeração real 1-based das páginas (`numero`) mesmo com páginas em branco intermediárias; acionar OCR multimodal sob demanda somente para páginas sem texto nativo e nunca inventar texto quando uma página estiver em branco ou o OCR falhar; validar estritamente dimensão 1536 (`EXPECTED_EMBEDDING_DIMENSION = 1536`) e finitude numérica dos vetores; manter chamadas externas de OCR e embeddings fora de transações PostgreSQL no worker e pular chunks já indexados (`embedding IS NOT NULL`) em retries para evitar custo duplicado; executar busca híbrida real (`pgvector` `<=>` + `ts_rank_cd` em português) restrita ao acervo autorizado (`responsavel` próprio ou `estudante` vinculada em `responsavel_estudante`); exigir `fonteChunkIds` não vazio em todo artefato gerado por IA e propagar `fonteChunkIds` aos `cards` FSRS somente após aprovação humana explícita (`curarItem`).
+- **Testes necessários:** PDF digital, PDF digitalizado com OCR, falha de OCR, página em branco sem texto inventado, geração de embeddings 1536-d, incompatibilidade dimensional (`DIMENSION_MISMATCH`), falha transitória de provedor sem reindexar chunks já persistidos, busca semântica com proveniência, busca sem resultados (`[]`) vs erro de provedor (`EXTERNAL_SERVICE_ERROR`) vs erro de banco (`PERSISTENCE_ERROR`), isolamento de ownership entre perfis, bloqueio de aprovação sem `fonteChunkIds`, rollback e reaplicação idempotente da proposta SQL.
+- **Critérios de aceite:** nenhum vetor hash ou texto inventado entra no runtime; todo item gerado permanece `rascunho`/`pendente` até curadoria humana e referencia `fonteChunkIds` reais do arquivo de origem; busca híbrida respeita ownership e retorna fonte, página, trecho e pontuação real.
+- **Reversão:** aplicar `F1_12_ROLLBACK_BUSCA_VETORIAL_E_INDICES.sql` para remover índices HNSW/FTS e constraints de proveniência se necessário; nunca reintroduzir vetores simulados por hash ou autoaprovação de IA.
+- **Validação:** `npx tsc --noEmit` (0 erros), `npm run test:run` (29 suítes / 249 testes aprovados, incluindo 5 cenários de integração real em PostgreSQL 18.6 descartável PGlite + `pgvector` em `f1_12_ia_busca_integracao.test.ts`), `npm run build`, `npx eslint` nos 10 arquivos TS modificados (0 erros, 0 warnings), `npx drizzle-kit check`, `git diff --check` e suíte RLS `scripts/f1_04/run-rls-validation.mjs` (41/41 cenários aprovados).
+- **Bloqueadores explícitos de implantação mantidos:**
+  1. Compatibilidade entre os nomes das funções auxiliares RLS da F1.04 (`medicina.current_perfil_id()` / `medicina.is_responsavel()`) e os verificados pelo preflight da F1.11 (`public.rls_current_perfil_id()` / `public.rls_is_responsavel()`).
+  2. Verificação imediata de integridade do conteúdo de objetos adotados após resposta `OBJECT_EXISTS` no fluxo síncrono de upload.
+  3. Homologação das policies Supabase Storage (`F1_10_STORAGE_POLICIES_PROPOSTA.sql`) e do papel de serviço efetivamente utilizado no ambiente remoto.
+  4. Implantação operacional do worker/scheduler independente para consumir `processarProximoJobAcervo`.
+- **Próximo gate:** F1.13 (Consolidação técnica e preparação para homologação; preservando integralmente a prioridade original de Estado server-side do ciclo e cronômetro como F1.14).
 
-### F1.13 — Estado server-side do ciclo e cronômetro
+### F1.13 — Consolidação técnica e preparação para homologação
 
-- **Objetivo:** estabelecer uma única fonte de verdade e sincronização entre dispositivos.
-- **Arquivos potencialmente afetados:** `CronometroPage.tsx`, `CicloPage.tsx`, `HojePage.tsx`, `sessao.ts`, `ciclo.ts`, possivelmente schema/migration de versão/checkpoint.
-- **Dependências:** F1.03, F1.07 e F1.08.
-- **Riscos:** sessões locais antigas; conflitos multiaba; carga de heartbeat.
-- **Estratégia:** versão de sessão/checkpoint no servidor; persistência periódica e em eventos; localStorage como cache com user/session/version/TTL; reconciliação; BroadcastChannel opcional para abas.
-- **Testes necessários:** refresh, offline curto, troca de dispositivo, duas abas, clock drift, limpeza do storage e retomada.
-- **Critérios de aceite:** ponteiro e tempo convergem ao servidor; limpar navegador não perde progresso persistido; avanço ocorre uma vez.
-- **Reversão:** manter leitura temporária do formato local antigo para migração; não voltar a torná-lo autoridade.
+**Status:** concluída em 21/10/2026 como **APROVADA COM RESSALVAS**. Divergência de numeração registrada e prioridades originais preservadas: no plano original, o identificador `F1.13` estava reservado para *Estado server-side do ciclo e cronômetro*; por determinação operacional, a `F1.13` consolidou a compatibilidade técnica entre `F1.03-R`, `F1.04`, `F1.09`, `F1.10`, `F1.11` e `F1.12` antes da futura homologação, deslocando *Estado server-side do ciclo e cronômetro* para `F1.14`, *Backup completo e recuperação testada* para `F1.15` e *Testes de segurança, E2E e operação* para `F1.16`, sem suprimir nenhuma entrega.
 
-### F1.14 — Backup completo e recuperação testada
+- **Objetivo:** verificar a compatibilidade entre as melhorias `F1.03-R`, `F1.04`, `F1.09`, `F1.10`, `F1.11` e `F1.12`, corrigir incompatibilidades críticas antes da homologação e preparar o checklist objetivo de homologação.
+- **Arquivos gerados/afetados:** `docs/modernizacao/propostas/F1_04_RLS_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_04_ROLLBACK_RLS.sql`, `docs/modernizacao/propostas/F1_09_INTEGRIDADE_E_IDEMPOTENCIA_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_10_STORAGE_POLICIES_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_10_ROLLBACK_STORAGE_POLICIES.sql`, `docs/modernizacao/propostas/F1_11_FILA_INGESTAO_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_11_ROLLBACK_FILA_INGESTAO.sql`, `docs/modernizacao/propostas/F1_12_BUSCA_VETORIAL_E_INDICES_PROPOSTA.sql`, `docs/modernizacao/propostas/F1_12_ROLLBACK_BUSCA_VETORIAL_E_INDICES.sql`, `src/db/index.ts`, `src/lib/env.ts`, `.env.example`, `src/lib/ingestion.ts`, `src/app/actions/acervo.ts`, `src/app/actions/acervo.test.ts`, `src/app/actions/f1_10_storage_integracao.test.ts`, `src/app/actions/f1_13_consolidacao_homologacao.test.ts`, `docs/modernizacao/PLANO_MODERNIZACAO.md`, `docs/modernizacao/RELATORIO_F1_13.md`, `~/Documents/MEDICINA_2029_F1_13_RELATORIO.md`.
+- **Dependências:** F1.03-R, F1.04, F1.09, F1.10, F1.11 e F1.12.
+- **Incompatibilidades críticas corrigidas:**
+  1. **Colisão de assinatura/semântica RLS entre `F1_04`, `F1_10` e `F1_11`:** unificadas as funções `medicina.current_perfil_id()`, `medicina.current_papel()`, `medicina.is_estudante()` e `medicina.is_responsavel()` (exigindo `medicina.current_perfil_id() IS NOT NULL` em `F1_04` e `F1_10`), e corrigida a referência inexistente `public.rls_current_perfil_id()` / `public.rls_is_responsavel()` em `F1_11_FILA_INGESTAO_PROPOSTA.sql`.
+  2. **Lacuna de RLS/GRANT em `public.operacoes_idempotentes` (F1.09):** adicionados `ENABLE/FORCE ROW LEVEL SECURITY`, policy `operacoes_idempotentes_own_policy` (`perfil_id = medicina.current_perfil_id()`) e `GRANT SELECT, INSERT, UPDATE, DELETE` para `medicina_app` tanto em `F1_09` quanto condicionalmente em `F1_04`.
+  3. **Idempotência de DDL em `F1_09`:** `ADD CONSTRAINT ... NOT VALID` precedido por `DROP CONSTRAINT IF EXISTS` para permitir reaplicação segura.
+  4. **Papel de mínimo privilégio `medicina_worker` (`NOSUPERUSER NOBYPASSRLS`):** provisionado em `F1_11_FILA_INGESTAO_PROPOSTA.sql` (com `DATABASE_WORKER_URL` em `src/db/index.ts` e `src/lib/env.ts`), com `GRANT` e policies RLS restritos às tabelas do pipeline (`acervo_jobs`, `acervo_arquivos`, `acervo_paginas`, `acervo_chunks`, `topicos`, `disciplinas`) e leitura de objetos registrados em `storage.objects` (`F1_10_STORAGE_POLICIES_PROPOSTA.sql`), sem qualquer acesso a `perfis`, `allowlist`, `sessoes`, `checkins`, `simulados`, `redacoes` ou `curadoria_fila`.
+  5. **Busca híbrida sob RLS para `estudante` vinculada:** criada `medicina.fn_busca_hibrida_acervo` (`SECURITY DEFINER` com `search_path = public, medicina, pg_temp` e verificação anti-spoofing de `medicina.current_perfil_id()`) em `F1_12_BUSCA_VETORIAL_E_INDICES_PROPOSTA.sql` e integrada em `buscaHibridaAcervo` (`src/lib/ingestion.ts`), permitindo que a estudante pesquise trechos indexados dos responsáveis vinculados sem abrir `SELECT` direto na tabela `public.acervo_arquivos` (preservando o cenário C14 da F1.04).
+  6. **Constraint de proveniência em `public.cards` (`cards_gerado_proveniencia_check`):** adicionada em `F1_12_BUSCA_VETORIAL_E_INDICES_PROPOSTA.sql` (`origem <> 'gerado' OR jsonb_array_length(fonte_chunk_ids) > 0`).
+  7. **Verificação imediata de integridade SHA-256 após `OBJECT_EXISTS` no upload síncrono:** `enviarArquivo` (`src/app/actions/acervo.ts`) baixa imediatamente os bytes do objeto pré-existente via `downloadFromSupabaseStorage(filePath)` e compara tamanho e SHA-256 antes de adotar o objeto no banco, rejeitando divergências com `CONFLICT` e falha de leitura com `EXTERNAL_SERVICE_ERROR`.
+- **Validação:** `npx tsc --noEmit` (0 erros), `npm run test:run` (30 suítes / 254 testes aprovados, incluindo a suíte ponta a ponta `f1_13_consolidacao_homologacao.test.ts` em PostgreSQL 18.6 descartável PGlite + `pgvector`), `npm run build`, `npx eslint` nos arquivos modificados (0 erros, 0 warnings), `npx drizzle-kit check`, `git diff --check` e suíte RLS `scripts/f1_04/run-rls-validation.mjs` (41/41 cenários aprovados).
+- **Próximo gate:** F1.14 (Estado server-side do ciclo e cronômetro) ou execução em janela autorizada do Checklist de Homologação da F1.13 em ambiente de staging.
 
-- **Objetivo:** oferecer recuperação real, incluindo acervo, sem expor segredos.
-- **Arquivos potencialmente afetados:** novo módulo operacional de backup, Storage, schema de manifesto, documentação/runbook; substituição de `backup.ts`.
-- **Dependências:** F1.05, F1.10 e F1.11.
-- **Riscos:** custo/tempo, retenção de dados sensíveis, backup incompleto, restore destrutivo.
-- **Estratégia:** manifesto versionado de todas as tabelas e objetos; hashes; criptografia autenticada; snapshot consistente; restore em base temporária; validação e promoção; agendamento semanal e retenção.
-- **Testes necessários:** round-trip integral, arquivos, relações, corrupção de arquivo, versão incompatível, restore interrompido e recuperação.
-- **Critérios de aceite:** amostra completa restaura com contagens/constraints/hashes iguais; credenciais não são exportadas; RTO/RPO documentados.
-- **Reversão:** backups são append-only; nova versão não invalida a anterior; promoção só após validação.
+### F1.14 — Estado server-side do ciclo e cronômetro (anteriormente F1.13)
 
-### F1.15 — Testes de segurança, E2E e operação
+**Status:** concluída em 21/10/2026 como **APROVADA**; PostgreSQL estabelecido como única fonte da verdade para ciclo e cronômetro de estudo; purga total de mocks (`MOCK_CICLO_ATIVO`, `MOCK_BLOCOS`, `MOCK_TOPICOS`, `q-mock-*`, `t-mock-*`) e de autoridades fictícias em `localStorage` (`medicina_2029_proxima_ordem`, `medicina_2029_concluidos_semana`); 5 estados explícitos implementados (`nao_iniciada`, `em_andamento`, `pausada`, `concluida`, `falha_sincronizacao`); reconciliação server-side com teto de tempo físico (`wall-clock`); idempotência de checkpoints e avanço com locks transacionais (`pg_advisory_xact_lock` e `FOR UPDATE`); suíte de integração em PostgreSQL 18.6 PGlite (`f1_14_ciclo_cronometro_integracao.test.ts`) com 5 cenários aprovados e testes de reconciliação (`cicloCronometroReconciliacao.test.ts`, 6 testes); validação completa de 32 suítes / 265 testes aprovados.
 
-- **Objetivo:** transformar as garantias anteriores em gates automatizados.
-- **Arquivos potencialmente afetados:** testes Vitest/Playwright, configs, CI, README/runbooks; sem mudança funcional por si só.
-- **Dependências:** todas as tarefas anteriores conforme o fluxo testado.
-- **Riscos:** testes frágeis; E2E alterar dados compartilhados; tempo de pipeline.
-- **Estratégia:** banco descartável por execução; fixtures sem credenciais fixas; E2E real desktop/mobile; threshold de cobertura para regras críticas; CI com TypeScript, lint, unitário, integração, E2E, build e audit.
-- **Testes necessários:** os próprios gates, incluindo matriz de papéis, RLS, login, sessão+erro+ponteiro, FSRS conhecido, upload/job, curadoria, simulado pendente e backup round-trip.
-- **Critérios de aceite:** nenhum placeholder; pipeline reproduzível; falha bloqueia merge; documentação contém setup/env/deploy/backup/pipeline sem segredos.
-- **Reversão:** desabilitar temporariamente apenas teste comprovadamente flakey com issue e prazo; nunca remover gate de segurança sem substituto.
+- **Objetivo:** estabelecer o PostgreSQL como a única fonte de verdade para o ciclo e o cronômetro, com persistência durável, recuperação real após refresh/reconexão/troca de abas ou dispositivos, e eliminação de estados locais fictícios.
+- **Arquivos gerados/afetados:** `src/lib/validation.ts`, `src/lib/cicloCronometroReconciliacao.ts`, `src/lib/cicloCronometroReconciliacao.test.ts`, `src/app/actions/ciclo.ts`, `src/app/actions/sessao.ts`, `src/app/actions/actions.test.ts`, `src/app/actions/f1_14_ciclo_cronometro_integracao.test.ts`, `src/app/page.tsx`, `src/app/ciclo/page.tsx`, `src/components/CicloPage.tsx`, `src/components/HojePage.tsx`, `src/components/CronometroPage.tsx`, `docs/modernizacao/RELATORIO_F1_14.md`, `~/Documents/MEDICINA_2029_F1_14_RELATORIO.md`.
+- **Implementações e endurecimentos:**
+  1. *Purga completa de mocks pedagógicos:* remoção de `MOCK_CICLO_ATIVO`, `MOCK_BLOCOS`, `MOCK_TOPICOS` de todas as Server Actions e componentes. Quando não há ciclo ativo ou tópicos no banco, o sistema retorna `null`/vazio e exibe estado amigável sem inventar dados.
+  2. *Reconciliação e recuperação resiliente:* rotina pura `reconciliarEstadoCronometroComServidor` calcula teto físico decorrido (`agoraMs - iniciadaEm`) e tempo restante nominal, descartando qualquer cache local incompatível com a sessão do banco. Recuperação automática em montagem, reconexão de rede (`online`) e retorno à aba (`visibilitychange`).
+  3. *Prevenção de duplicidade e concorrência:* `iniciarSessao` verifica se já existe sessão aberta para o perfil do estudante (rejeitando com `CONFLICT` caso tente iniciar outro bloco sem concluir o anterior); `sincronizarCheckpointSessao` aplica `FOR UPDATE` para garantir monotonicidade de etapas e tempos; `atualizarPonteiroCiclo` utiliza `pg_advisory_xact_lock` no ciclo ativo e `ordemEsperada` para evitar saltos duplos de bloco.
+  4. *Cinco estados operacionais explícitos:* `nao_iniciada`, `em_andamento`, `pausada`, `concluida` e `falha_sincronizacao`. Falhas de rede ou servidor nunca inventam tempo estudado nem avançam o ciclo.
+  5. *Integridade no registro de erros:* purga dos geradores de IDs fictícios `q-mock-*` e `t-mock-*`. Apenas anotações com UUIDs reais de questão e tentativa são enviadas para `caderno_erros`; anotações livres do cronômetro são consolidadas em `nota_livre` sem poluir as chaves estrangeiras.
+- **Segurança e RLS (Bloqueador de Homologação):**
+  - RLS não foi ativado nesta tarefa e nenhuma autoridade foi presumida resolvida prematuramente.
+  - As novas schemas em `src/lib/validation.ts` (`acaoPonteiroCicloSchema`, `atualizarPonteiroCicloInputSchema`, `obterEstadoSessaoCronometroInputSchema`, `sincronizarCheckpointSessaoInputSchema`) rejeitam sumariamente campos de identidade fornecidos pelo cliente (`perfilId`, `papel`, etc.). A identidade é extraída exclusivamente da sessão de autenticação do servidor (`obterContextoAutenticado`).
+  - **Bloqueador obrigatório registrado para homologação:** A integração do contexto RLS derivado da sessão autenticada (`medicina.set_context(perfil_id, papel)`) no pool/transação de conexões das Server Actions, incluindo os fluxos de ciclo e cronômetro, permanece como requisito bloqueante antes da ativação do RLS no ambiente alvo.
+- **Validação:** `npx tsc --noEmit` (0 erros), `npx eslint` nos 12 arquivos afetados (0 erros, 0 warnings), `npx drizzle-kit check`, `git diff --check`, `npm run test:run` (32 suítes / 265 testes aprovados), `npm run build` (Turbopack otimizado concluído com êxito) e suíte RLS `scripts/f1_04/run-rls-validation.mjs` (41/41 cenários aprovados).
+- **Próximo gate:** F1.15 (Backup completo e recuperação testada).
+
+### F1.15 — Backup completo e recuperação testada (anteriormente F1.14)
+
+**Status:** concluída em 21/10/2026 como **APROVADA**; inventário completo de 35 tabelas em 7 domínios e 6 níveis topológicos; grafo de dependências e tratamento de autorreferência (`topicos.pai_id`); scripts operacionais nativos (`scripts/backup/`) com `pg_dump -Fc`, SHA-256, AES-256-GCM e retenção GFS (7D/4W/12M/3Y); motor de manifesto do Storage canônico com ordenação RFC 8785 e validação física (`src/lib/storageBackupManifest.ts`); suíte de testes unitários (23 testes) e integração completa round-trip em PostgreSQL descartável (PGlite + `pgvector`, 5 cenários); runbook operacional completo com RTO ($\le$ 30-45 min) e RPO ($\le$ 5 min / 24h); preservação da segurança F1.05 (sem interface de restore para usuário final e sem reativação de JSON destrutivo); validação total de 34 suítes e 293 testes aprovados.
+
+- **Objetivo:** oferecer procedimento reproduzível, auditável e testado para recuperação completa do PostgreSQL e dos arquivos privados do Storage, com integridade referencial, segurança e rastreabilidade.
+- **Arquivos gerados/afetados:**
+  - `src/lib/storageBackupManifest.ts`: motor de manifesto do Storage, hash SHA-256, ordenação canônica RFC 8785, validação física e reconciliação contra `acervo_arquivos`.
+  - `src/lib/storageBackupManifest.test.ts`: suíte com 23 testes unitários cobrindo determinismo, detecção de arquivos corrompidos/ausentes/órfãos e reconciliação com banco.
+  - `docs/modernizacao/RUNBOOK_BACKUP_RECUPERACAO.md`: runbook técnico detalhado com inventário das 35 tabelas, topologia de restauração, RTO/RPO, retenção GFS, comandos nativos, sanitização pós-restore e critérios de fail-closed.
+  - `scripts/backup/backup_postgres.sh`: script de backup nativo PostgreSQL (`pg_dump -Fc` com soma SHA-256 e criptografia AES-256-CBC/GCM).
+  - `scripts/backup/restore_postgres.sh`: script de restauração segura em banco descartável com checagem de preflight e foreign keys.
+  - `scripts/backup/verify_restore.sh`: script de verificação de integridade e contagem pós-restore.
+  - `scripts/backup/reconcile_storage.sh`: script de reconciliação entre manifesto de storage e registros de banco.
+  - `src/app/actions/f1_15_backup_recuperacao_integracao.test.ts`: suíte de integração em PostgreSQL 18.6 descartável (PGlite + `pgvector`) cobrindo 5 cenários críticos de restauração integral.
+  - `docs/modernizacao/RELATORIO_F1_15.md` e `~/Documents/MEDICINA_2029_F1_15_RELATORIO.md`.
+- **Implementações e garantias técnicas:**
+  1. *Inventário integral de 35 tabelas do PostgreSQL:* classificado em 7 domínios (Identidade & Vínculos, Conteúdo & Taxonomia, Planejamento & Ciclo, Estudo & Sessões, Acervo & Ingestão IA, Avaliações & Correção, Operações & Idempotência) e 6 níveis topológicos de dependência (Nível 0 a Nível 5). Tratamento explícito de chave autorreferencial em `topicos.pai_id` via pré-criação/deferred constraints.
+  2. *Estratégia e limitações do ambiente:* O runbook operacional prescreve comandos nativos `pg_dump` e `pg_restore` (`-Fc`). Registrou-se a limitação de que `pg_dump`/`pg_restore` não estão disponíveis no `$PATH` local do ambiente macOS; em estrita conformidade com os princípios do projeto, a validação de restauração real foi executada contra instâncias reais de PostgreSQL 18.6 PGlite com expansão `pgvector`, sem qualquer mock de dados ou de banco.
+  3. *Manifesto canônico do Storage:* Geração com serialização determinística RFC 8785 (chaves ordenadas lexicograficamente), hashing SHA-256 de cada objeto e do manifesto global, e checagem bidirecional contra `acervo_arquivos` (`filePath`, `hashConteudo`, `tamanhoBytes`, `mime`).
+  4. *Restauração isolada e sanitização pós-restore:*
+     - Validação de integridade referencial fail-closed: tentativa de carregar chaves estrangeiras órfãs é rejeitada sumariamente pelo PostgreSQL (erro `23503`).
+     - Saneamento de sessões zumbis: sessões sem encerramento (`encerrada_em IS NULL`) são finalizadas com base no tempo efetivo ou no momento do snapshot, marcadas como `concluida = false` e anotadas com nota explicativa.
+     - Rearmamento de jobs em voo: jobs em status `em_execucao` têm seus locks liberados e são resetados para `aguardando`, permitindo que os workers da nova infraestrutura retomem o pipeline sem duplicidade de processamento.
+  5. *Segurança e Proteção de Dados (F1.05 preservada):* Não foi criada nenhuma rota ou interface de restauração para o usuário final. As credenciais nunca são exportadas em texto claro; senhas em `perfis.password_hash` são mantidas com hashing bcrypt resistente e exportadas apenas via dump nativo criptografado com chave mestra externa. A rota de exportação JSON (`backup.ts`) permanece como snapshot defensivo de conformidade do estudante (F1.05), sem capacidade destrutiva de importação.
+- **Validação:** `npx tsc --noEmit` (0 erros), `npx eslint` nos novos módulos e testes (0 erros, 0 warnings), `npx drizzle-kit check`, `git diff --check`, `npm run test:run` (34 suítes / 293 testes aprovados, 100% de sucesso), `npm run build` (Next.js 16.4.2 Turbopack otimizado concluído com êxito) e suíte RLS `scripts/f1_04/run-rls-validation.mjs` (41/41 cenários aprovados).
+- **Próximo gate:** F1.16 (Testes de segurança, E2E e operação).
+
+### F1.16 — Testes de segurança, E2E e operação (anteriormente F1.15)
+
+**Status:** concluída em 21/10/2026 como **APROVADA E HOMOLOGADA**; consolidação integral das 4 Prioridades da tarefa:
+1. **Prioridade 1 (Segurança RLS e integração transacional):** implementação de `applyRlsContext(tx, perfilId, papel)` em `src/db/rls-context.ts` com detecção não disruptiva via `to_regprocedure('medicina.set_context(uuid, text)')`; instrumentação transacional nas Server Actions de sessão (`iniciarSessao`, `atualizarSessao`, `sincronizarCheckpointSessao`, `concluirSessao`), ciclo (`atualizarPonteiroCiclo`, `iniciarCicloEstudos`, `resetarPlanejamento`), curadoria (`enfileirarGeracaoDeArtefatos`, `decidirItemCuradoria`), FSRS (`registrarRevisaoCard`) e simulados (`registrarSimulado`); autoridade soberana de identidade via NextAuth (`requireAuthenticatedProfile`, `requireRole`); preservação de locks transacionais (`pg_advisory_xact_lock`, `FOR UPDATE`) e idempotência; formalização do modelo de ameaça atestando que a checagem de UUID em `set_context` é validação relacional fail-closed e mitigação de spoofing por SQL arbitrário via queries parametrizadas (Drizzle), privilégio mínimo e Column-Level Grants em `perfis`.
+2. **Prioridade 2 (Testes de segurança RLS em PostgreSQL 18.6 PGlite descartável):** criação de `src/app/actions/f1_16_seguranca_rls_integracao.test.ts` cobrindo 10 cenários obrigatórios sob `FORCE ROW LEVEL SECURITY` (Responsável sem acesso a sessões brutas, Estudante com busca híbrida autorizada, isolamento cross-tenant, fail-closed sem sessão, rejeição de papel incorreto, travas WITH CHECK, segregação de `medicina_auth`, negação de leitura a `password_hash` por coluna, isolamento de `medicina_worker` ao pipeline e ausência de vazamento pós-commit / pool), todos aprovados (10/10).
+3. **Prioridade 3 (Testes E2E reais com Playwright):** 10 testes determinísticos aprovados em Desktop Chromium e Mobile Chrome (Pixel 5) em `e2e/workflow.spec.ts` cobrindo login defensivo, guarda anônima, controle de papéis, ciclo, cronômetro, persistência pós-F5, FSRS, simulados e logout.
+4. **Prioridade 4 (Backup nativo, saneamento pós-restore e criptografia):** tabela de auditoria `public.auditoria_saneamento_restore`, scripts operacionais `sanitizar_pos_restore.sh` e `reverter_saneamento_pos_restore.sh` com reversibilidade comprovada em banco, e round-trip criptográfico OpenSSL AES-256 PBKDF2 com validação SHA-256.
+
+- **Objetivo:** transformar as garantias anteriores em gates automatizados e assegurar a integração transacional do Row Level Security nas Server Actions.
+- **Arquivos gerados/afetados:** `src/db/rls-context.ts`, `src/db/rls-context.test.ts`, `src/app/actions/sessao.ts`, `src/app/actions/ciclo.ts`, `src/app/actions/curadoria.ts`, `src/app/actions/fsrs.ts`, `src/app/actions/simulados.ts`, `src/app/actions/f1_16_seguranca_rls_integracao.test.ts`, `e2e/workflow.spec.ts`, `e2e/helpers/auth.ts`, `playwright.config.ts`, `src/app/login/page.tsx`, `scripts/backup/sanitizar_pos_restore.sh`, `scripts/backup/reverter_saneamento_pos_restore.sh`, `scripts/backup/test_crypto_roundtrip.sh`, `scripts/backup/restore_postgres.sh`, `docs/modernizacao/RUNBOOK_BACKUP_RECUPERACAO.md`, `src/app/actions/f1_15_backup_recuperacao_integracao.test.ts`, `docs/modernizacao/RELATORIO_F1_16.md`, `docs/modernizacao/PLANO_MODERNIZACAO.md`.
+- **Dependências:** todas as etapas F1.02 a F1.15.
+- **Validação obtida:** 35 suítes / 307 testes Vitest (100% de aprovação), 41/41 cenários RLS históricos (`run-rls-validation.mjs`), 10/10 cenários RLS de integração, 10/10 testes E2E Desktop Chromium, 10/10 testes E2E Mobile Chrome, 6/6 testes de backup/saneamento/crypto, `npx tsc --noEmit` (0 erros), `npx eslint` (0 erros, 0 avisos), `npx drizzle-kit check` (íntegro), `npm run build` (Turbopack otimizado com sucesso) e `git diff --check` (0 erros).
 
 ## 4. Backlog posterior à estabilização
 
@@ -341,19 +396,26 @@ O sistema só deve receber dados reais quando todos os itens abaixo estiverem co
 - nenhuma resposta de sucesso sem persistência;
 - operações críticas atômicas/idempotentes;
 - versão crítica do Next.js atualizada;
-- upload privado validado e recuperável;
-- **bloqueador de publicação (F1.10/F1.11):** verificação do conteúdo do objeto adotado após resposta `OBJECT_EXISTS` no fluxo síncrono de upload (complementando a checagem SHA-256 `STORAGE_HASH_MISMATCH` executada pelo worker na etapa `extracao`);
-- **bloqueador de publicação (F1.10/F1.11):** homologação das policies Supabase Storage (`F1_10_STORAGE_POLICIES_PROPOSTA.sql`) e do papel de serviço efetivamente usado no ambiente remoto;
-- backup/restore round-trip aprovado;
-- E2E reais de login, sessão e papéis passando;
+- upload privado validado e recuperável, com verificação imediata de integridade SHA-256 na adoção de objeto pré-existente (`OBJECT_EXISTS`) resolvida em código na F1.13;
+- compatibilidade entre as propostas SQL (`0003`, `F1.04`, `F1.09`, `F1.10`, `F1.11` e `F1.12`), funções RLS (`medicina.*`), papel `medicina_worker` (`NOBYPASSRLS`) e função `medicina.fn_busca_hibrida_acervo` validada em PostgreSQL 18.6 descartável na F1.13;
+- **bloqueador de implantação (infraestrutura/homologação):** execução em janela autorizada da sequência canônica de migrations (`0003` → `F1.04` → `F1.09` → `F1.10` → `F1.11` → `F1.12`) e instrumentação do wrapper transacional `medicina.set_context(perfil_id, papel)` nas conexões `DATABASE_URL` (`medicina_app`) antes de ativar `FORCE ROW LEVEL SECURITY` em produção, abrangendo sistematicamente as Server Actions de ciclo, cronômetro e sessões (código de aplicação já pronto na F1.16);
+- **bloqueador de implantação (infraestrutura/homologação):** homologação das policies Supabase Storage (`F1_10_STORAGE_POLICIES_PROPOSTA.sql`) e do papel de serviço/conexão efetivamente usado no ambiente remoto;
+- **bloqueador de implantação (infraestrutura/homologação):** implantação operacional do worker/scheduler independente autenticado com `DATABASE_WORKER_URL` (`medicina_worker`) para consumir `processarProximoJobAcervo`;
+- estado server-side do ciclo e cronômetro implementado e validado (F1.14);
+- backup completo PostgreSQL e Storage validado com recuperação testada e manifesto íntegro (F1.15);
+- E2E reais de login, sessão e papéis passando (F1.16);
 - segredos rotacionados caso haja indício de uso cruzado ou credencial demo reutilizada.
 
-## 6. Próxima tarefa
+## 6. Próximo marco operacional
 
-**Próxima autorização recomendada: F1.12 — IA, proveniência, OCR e busca reais.**
+**Ciclo de Modernização e Estabilização Preliminar (F1.02 a F1.16) CONCLUÍDO COM SUCESSO.**
 
-Escopo: eliminar conteúdo, embeddings e OCR simulados no runtime, exigir `fonteChunkIds` e páginas válidas para publicação, integrar provedor real de embeddings na etapa `indexacao` do worker durável (`gerarEmbeddingReal`) e implementar busca híbrida (`HNSW` + `tsvector` em português).
+Todas as 15 etapas de modernização foram executadas, validadas e homologadas em bancos PostgreSQL 18.6 descartáveis (PGlite com `pgvector`), sem alteração ou acesso prematuro a instâncias persistentes ou ambientes de produção.
 
-A F1.11 concluiu a fila durável PostgreSQL (`public.acervo_jobs` em `F1_11_FILA_INGESTAO_PROPOSTA.sql` e rollback em `F1_11_ROLLBACK_FILA_INGESTAO.sql`) e o worker independente (`src/lib/acervoPipelineWorker.ts`) com claim atômico, lease/heartbeat, recuperação de leases expirados, retry com backoff exponencial e retomada idempotente por etapa (`extracao`, `segmentacao`, `classificacao`, `indexacao`), proibindo fallback silencioso para execução efêmera em memória e mantendo `indexacao` sem conclusão fictícia enquanto não houver provedor real de embeddings. A aplicação das propostas SQL (`F1_04`, `F1_09`, `F1_10` e `F1_11`) no ambiente remoto permanece bloqueada até janela operacional autorizada.
-
-Não iniciar automaticamente. Aguardar aprovação explícita.
+**Próximo marco recomendado:** Homologação Operacional em Ambiente Dedicado de Staging, compreendendo:
+1. Provisionamento de PostgreSQL remoto dedicado com extensão `vector`.
+2. Criação das roles `medicina_auth`, `medicina_app`, `medicina_worker` e `medicina_anon`.
+3. Execução das migrações e propostas SQL em janela autorizada (`0000..0003`, `F1.04`, `F1.09`, `F1.10`, `F1.11`, `F1.12`).
+4. Ativação de `FORCE ROW LEVEL SECURITY`.
+5. Drill de simulação de desastre (backup, decifragem, restore e saneamento auditado com medição cronometrada de RTO e RPO).
+6. Execução das suítes de teste de integração e Playwright contra o ambiente de staging.

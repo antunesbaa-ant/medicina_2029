@@ -193,6 +193,23 @@ ALTER TABLE public.acervo_figuras DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.geracoes NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE public.geracoes DISABLE ROW LEVEL SECURITY;
 
+DO $$
+BEGIN
+  IF to_regclass('public.operacoes_idempotentes') IS NOT NULL THEN
+    DROP POLICY IF EXISTS operacoes_idempotentes_own_policy ON public.operacoes_idempotentes;
+    ALTER TABLE public.operacoes_idempotentes NO FORCE ROW LEVEL SECURITY;
+    ALTER TABLE public.operacoes_idempotentes DISABLE ROW LEVEL SECURITY;
+  END IF;
+
+  IF to_regclass('public.acervo_jobs') IS NOT NULL THEN
+    DROP POLICY IF EXISTS acervo_jobs_responsavel_all ON public.acervo_jobs;
+    DROP POLICY IF EXISTS acervo_jobs_worker_all ON public.acervo_jobs;
+    ALTER TABLE public.acervo_jobs NO FORCE ROW LEVEL SECURITY;
+    ALTER TABLE public.acervo_jobs DISABLE ROW LEVEL SECURITY;
+  END IF;
+END
+$$;
+
 -- ----------------------------------------------------------------------------
 -- 4. REMOÇÃO DO SCHEMA DEDICADO MEDICINA E FUNÇÕES
 -- ----------------------------------------------------------------------------

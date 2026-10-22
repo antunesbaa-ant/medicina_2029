@@ -4,8 +4,12 @@ import { integer, pgTable, text, timestamp, uuid, varchar } from 'drizzle-orm/pg
 import { db } from '../db';
 import { acervoArquivos, acervoChunks, acervoPaginas, perfis } from '../db/schema';
 import {
+  EXPECTED_EMBEDDING_DIMENSION,
+  GeminiEmbeddingError,
+  GeminiOcrError,
   classificarTópicoChunk,
   extrairTextoPDF,
+  gerarEmbeddingReal as gerarEmbeddingRealPadrao,
   segmentarTexto,
   type ChunkSegmentado,
 } from './ingestion';
@@ -158,6 +162,48 @@ export function sanitizarErroJobAcervo(error: unknown): {
       codigo: error.code,
       mensagemPublica: 'Execução interrompida por perda ou expiração de lease.',
       retentavel: true,
+    };
+  }
+
+  if (error instanceof GeminiEmbeddingError) {
+    if (error.code === 'MISSING_API_KEY') {
+      return {
+        codigo: 'EMBEDDING_PROVIDER_UNAVAILABLE',
+        mensagemPublica:
+          'Provedor real de embeddings indisponível. Extração, segmentação e classificação foram preservadas para retomada na etapa de indexação.',
+        retentavel: false,
+      };
+    }
+    if (error.code === 'DIMENSION_MISMATCH') {
+      return {
+        codigo: 'EMBEDDING_DIMENSION_MISMATCH',
+        mensagemPublica: sanitizarTextoErro(error.message),
+        retentavel: false,
+      };
+    }
+    return {
+      codigo: `EMBEDDING_${error.code}`,
+      mensagemPublica: error.retryable
+        ? 'Falha transitória no provedor de embeddings. Os vetores já persistidos foram preservados para retomada.'
+        : sanitizarTextoErro(error.message),
+      retentavel: error.retryable,
+    };
+  }
+
+  if (error instanceof GeminiOcrError) {
+    if (error.code === 'MISSING_API_KEY') {
+      return {
+        codigo: 'OCR_PROVIDER_UNAVAILABLE',
+        mensagemPublica: 'Provedor de OCR indisponível para documento digitalizado.',
+        retentavel: false,
+      };
+    }
+    return {
+      codigo: `OCR_${error.code}`,
+      mensagemPublica: error.retryable
+        ? 'Falha transitória no serviço de OCR. O trabalho foi reagendado.'
+        : sanitizarTextoErro(error.message),
+      retentavel: error.retryable,
     };
   }
 
@@ -547,7 +593,12 @@ export async function processarProximoJobAcervo(
   const extrairTexto = deps?.extrairTexto ?? extrairTextoPDF;
   const segmentar = deps?.segmentar ?? segmentarTexto;
   const classificarChunk = deps?.classificarChunk ?? classificarTópicoChunk;
-  const gerarEmbeddingReal = deps?.gerarEmbeddingReal ?? null;
+  const gerarEmbeddingReal =
+    deps && 'gerarEmbeddingReal' in deps
+      ? deps.gerarEmbeddingReal ?? null
+      : process.env.GEMINI_API_KEY?.trim()
+        ? gerarEmbeddingRealPadrao
+        : null;
 
   const job = await reivindicarProximoJobAcervo(workerId, {
     now: nowFn(),
@@ -801,8 +852,15 @@ export async function processarProximoJobAcervo(
         }
         await renovarHeartbeatJobAcervo(job.id, workerId, { now: nowFn(), leaseDurationMs });
         const vetor = await gerarEmbeddingReal(chunk.texto);
-        if (!Array.isArray(vetor) || vetor.length !== 1536) {
-          throw new Error('Dimensão de embedding inválida retornada pelo provedor.');
+        if (
+          !Array.isArray(vetor) ||
+          vetor.length !== EXPECTED_EMBEDDING_DIMENSION ||
+          !vetor.every((v) => typeof v === 'number' && Number.isFinite(v))
+        ) {
+          throw new NonRetryablePipelineError(
+            'EMBEDDING_DIMENSION_MISMATCH',
+            `Dimensão de embedding incompatível com vector(${EXPECTED_EMBEDDING_DIMENSION}).`
+          );
         }
 
         await db

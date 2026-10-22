@@ -35,6 +35,22 @@ export function resolveDatabaseAuthUrl(): string {
   return url;
 }
 
+export function resolveDatabaseWorkerUrl(): string {
+  const url =
+    process.env.DATABASE_WORKER_URL ||
+    process.env.DATABASE_APP_URL ||
+    process.env.DATABASE_URL;
+  if (!url) {
+    if (process.env.NODE_ENV === 'production' && process.env.NEXT_PHASE !== 'phase-production-build') {
+      throw new Error(
+        'Configuração ausente: DATABASE_WORKER_URL (ou DATABASE_APP_URL / DATABASE_URL) é obrigatória em ambiente de produção.'
+      );
+    }
+    return 'postgres://postgres@localhost:5432/medicina_dev';
+  }
+  return url;
+}
+
 const appConnectionString = resolveDatabaseAppUrl();
 export const client = postgres(appConnectionString);
 export const db = drizzle(appConnectionString, { schema });

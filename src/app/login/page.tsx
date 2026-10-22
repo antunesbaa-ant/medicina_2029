@@ -26,13 +26,17 @@ function LoginForm() {
         redirect: false,
       });
 
-      if (res?.error) {
-        setErro(res.error === 'CredentialsSignin' ? 'E-mail ou senha incorretos.' : res.error);
+      if (res?.error || (res?.url && (res.url.includes('csrf=true') || res.url.includes('error=')))) {
+        setErro(
+          res?.error === 'CredentialsSignin' || res?.url?.includes('csrf=true')
+            ? 'E-mail ou senha incorretos.'
+            : (res?.error || 'E-mail ou senha incorretos.')
+        );
       } else {
         router.push('/');
         router.refresh();
       }
-    } catch (err: any) {
+    } catch {
       setErro('Ocorreu um erro ao tentar fazer login. Tente novamente.');
     } finally {
       setLoading(false);

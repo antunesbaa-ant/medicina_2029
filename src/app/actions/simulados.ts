@@ -12,6 +12,7 @@ import {
   type OperationResult,
 } from '../../lib/operation-result';
 import { registrarSimuladoInputSchema } from '../../lib/validation';
+import { applyRlsContext } from '../../db/rls-context';
 
 export interface SimuladoAreaInput {
   area: string; // Ex: Linguagens, Matemática, Natureza, Humanas
@@ -84,6 +85,8 @@ export async function registrarSimulado(
 
   try {
     return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
+
       // Serializa por estudante inclusive quando ainda não existe linha para bloquear.
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`simulado:${perfil.id}`}::text, 0))`

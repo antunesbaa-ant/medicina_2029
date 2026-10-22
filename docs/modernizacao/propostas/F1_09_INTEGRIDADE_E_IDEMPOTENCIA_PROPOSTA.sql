@@ -144,7 +144,7 @@ END
 $$;
 
 -- 2. LEDGER E CHAVES PERSISTIDAS DE IDEMPOTÊNCIA (ADITIVO E COMPATÍVEL)
-CREATE TABLE "operacoes_idempotentes" (
+CREATE TABLE IF NOT EXISTS "operacoes_idempotentes" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "perfil_id" uuid NOT NULL,
   "escopo" varchar(100) NOT NULL,
@@ -173,31 +173,35 @@ CREATE TABLE "operacoes_idempotentes" (
     ))
 );
 
-ALTER TABLE "card_revisoes" ADD COLUMN "chave_idempotencia" varchar(128);
-CREATE UNIQUE INDEX "card_revisoes_card_chave_idempotencia_uidx"
+ALTER TABLE "card_revisoes" ADD COLUMN IF NOT EXISTS "chave_idempotencia" varchar(128);
+CREATE UNIQUE INDEX IF NOT EXISTS "card_revisoes_card_chave_idempotencia_uidx"
   ON "card_revisoes" ("card_id", "chave_idempotencia")
   WHERE "chave_idempotencia" IS NOT NULL;
 
-ALTER TABLE "geracoes" ADD COLUMN "chave_idempotencia" varchar(128);
-CREATE UNIQUE INDEX "geracoes_chave_idempotencia_uidx"
+ALTER TABLE "geracoes" ADD COLUMN IF NOT EXISTS "chave_idempotencia" varchar(128);
+CREATE UNIQUE INDEX IF NOT EXISTS "geracoes_chave_idempotencia_uidx"
   ON "geracoes" ("chave_idempotencia")
   WHERE "chave_idempotencia" IS NOT NULL;
 
 -- 3. UNICIDADES NECESSÁRIAS (COMPATÍVEIS COM A EXPANSÃO F1.03-R)
-CREATE UNIQUE INDEX "sessoes_uma_aberta_por_bloco_topico_uidx"
+CREATE UNIQUE INDEX IF NOT EXISTS "sessoes_uma_aberta_por_bloco_topico_uidx"
   ON "sessoes" ("perfil_id", "ciclo_bloco_id", "topico_id")
   WHERE "encerrada_em" IS NULL;
 
+ALTER TABLE "erros" DROP CONSTRAINT IF EXISTS "erros_tentativa_id_unique";
 ALTER TABLE "erros"
   ADD CONSTRAINT "erros_tentativa_id_unique" UNIQUE ("tentativa_id");
 
+ALTER TABLE "curadoria_fila" DROP CONSTRAINT IF EXISTS "curadoria_fila_artefato_unique";
 ALTER TABLE "curadoria_fila"
   ADD CONSTRAINT "curadoria_fila_artefato_unique" UNIQUE ("artefato_tipo", "artefato_id");
 
+ALTER TABLE "acervo_arquivos" DROP CONSTRAINT IF EXISTS "acervo_arquivos_hash_conteudo_unique";
 ALTER TABLE "acervo_arquivos"
   ADD CONSTRAINT "acervo_arquivos_hash_conteudo_unique" UNIQUE ("hash_conteudo");
 
 -- 4. CONSTRAINTS DE INTEGRIDADE DE DOMÍNIO (NOT VALID + VALIDATE CONSTRAINT)
+ALTER TABLE "sessoes" DROP CONSTRAINT IF EXISTS "sessoes_tempos_limites_check";
 ALTER TABLE "sessoes"
   ADD CONSTRAINT "sessoes_tempos_limites_check"
   CHECK (
@@ -205,10 +209,12 @@ ALTER TABLE "sessoes"
     AND "segundos_pausa" >= 0 AND "segundos_pausa" <= 86400
   ) NOT VALID;
 
+ALTER TABLE "sessoes" DROP CONSTRAINT IF EXISTS "sessoes_ordem_temporal_check";
 ALTER TABLE "sessoes"
   ADD CONSTRAINT "sessoes_ordem_temporal_check"
   CHECK ("encerrada_em" IS NULL OR "encerrada_em" >= "iniciada_em") NOT VALID;
 
+ALTER TABLE "card_revisoes" DROP CONSTRAINT IF EXISTS "card_revisoes_duracao_rating_check";
 ALTER TABLE "card_revisoes"
   ADD CONSTRAINT "card_revisoes_duracao_rating_check"
   CHECK (
@@ -216,14 +222,17 @@ ALTER TABLE "card_revisoes"
     AND "rating" IN ('again', 'hard', 'good', 'easy')
   ) NOT VALID;
 
+ALTER TABLE "simulados" DROP CONSTRAINT IF EXISTS "simulados_duracao_limites_check";
 ALTER TABLE "simulados"
   ADD CONSTRAINT "simulados_duracao_limites_check"
   CHECK ("duracao_min" > 0 AND "duracao_min" <= 720) NOT VALID;
 
+ALTER TABLE "simulado_areas" DROP CONSTRAINT IF EXISTS "simulado_areas_acertos_total_check";
 ALTER TABLE "simulado_areas"
   ADD CONSTRAINT "simulado_areas_acertos_total_check"
   CHECK ("total" > 0 AND "total" <= 200 AND "acertos" >= 0 AND "acertos" <= "total") NOT VALID;
 
+ALTER TABLE "redacoes" DROP CONSTRAINT IF EXISTS "redacoes_limites_e_genero_check";
 ALTER TABLE "redacoes"
   ADD CONSTRAINT "redacoes_limites_e_genero_check"
   CHECK (
@@ -232,6 +241,7 @@ ALTER TABLE "redacoes"
     AND ("formato" <> 'genero_uece' OR "genero_id" IS NOT NULL)
   ) NOT VALID;
 
+ALTER TABLE "checkins" DROP CONSTRAINT IF EXISTS "checkins_limites_dominio_check";
 ALTER TABLE "checkins"
   ADD CONSTRAINT "checkins_limites_dominio_check"
   CHECK (
@@ -241,6 +251,7 @@ ALTER TABLE "checkins"
     AND "energia" BETWEEN 1 AND 5
   ) NOT VALID;
 
+ALTER TABLE "acervo_arquivos" DROP CONSTRAINT IF EXISTS "acervo_arquivos_tamanho_serie_check";
 ALTER TABLE "acervo_arquivos"
   ADD CONSTRAINT "acervo_arquivos_tamanho_serie_check"
   CHECK (
@@ -256,5 +267,42 @@ ALTER TABLE "simulado_areas" VALIDATE CONSTRAINT "simulado_areas_acertos_total_c
 ALTER TABLE "redacoes" VALIDATE CONSTRAINT "redacoes_limites_e_genero_check";
 ALTER TABLE "checkins" VALIDATE CONSTRAINT "checkins_limites_dominio_check";
 ALTER TABLE "acervo_arquivos" VALIDATE CONSTRAINT "acervo_arquivos_tamanho_serie_check";
+
+-- 5. PRIVILÉGIOS E RLS COMPATÍVEIS (QUANDO OS PAPÉIS DA F1.04 ESTIVEREM PRESENTES)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_app') THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.operacoes_idempotentes TO medicina_app;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_anon') THEN
+    REVOKE ALL ON public.operacoes_idempotentes FROM medicina_anon;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relname = 'perfis'
+      AND c.relrowsecurity = true
+  ) AND to_regprocedure('medicina.current_perfil_id()') IS NOT NULL THEN
+    ALTER TABLE public.operacoes_idempotentes ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.operacoes_idempotentes FORCE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS operacoes_idempotentes_own_policy ON public.operacoes_idempotentes;
+    CREATE POLICY operacoes_idempotentes_own_policy
+      ON public.operacoes_idempotentes
+      FOR ALL
+      USING (
+        medicina.current_perfil_id() IS NOT NULL
+        AND perfil_id = medicina.current_perfil_id()
+      )
+      WITH CHECK (
+        medicina.current_perfil_id() IS NOT NULL
+        AND perfil_id = medicina.current_perfil_id()
+      );
+  END IF;
+END
+$$;
 
 COMMIT;

@@ -3,7 +3,9 @@ import {
   withRlsContext,
   withAuthenticatedUser,
   withStudentContext,
-  withResponsibleContext
+  withResponsibleContext,
+  applyRlsContext,
+  type DrizzleTransaction
 } from './rls-context';
 import { db } from './index';
 import * as authModule from '../lib/authorization';
@@ -30,8 +32,8 @@ describe('RLS Context Integration Helpers', () => {
         execute: vi.fn().mockResolvedValue([])
       };
 
-      const spyTransaction = vi.spyOn(db, 'transaction').mockImplementation(async (callback: any) => {
-        return await callback(mockTx);
+      const spyTransaction = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
+        return await (callback as (tx: unknown) => unknown)(mockTx);
       });
 
       const testId = '10000000-0000-4000-8000-000000000001';
@@ -52,8 +54,8 @@ describe('RLS Context Integration Helpers', () => {
         execute: vi.fn().mockResolvedValue([])
       };
 
-      const spyTransaction = vi.spyOn(db, 'transaction').mockImplementation(async (callback: any) => {
-        return await callback(mockTx);
+      const spyTransaction = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
+        return await (callback as (tx: unknown) => unknown)(mockTx);
       });
 
       const testId = '10000000-0000-4000-8000-000000000001';
@@ -83,7 +85,7 @@ describe('RLS Context Integration Helpers', () => {
       const mockTx = {
         execute: vi.fn().mockResolvedValue([])
       };
-      const spyTx = vi.spyOn(db, 'transaction').mockImplementation(async (cb: any) => cb(mockTx));
+      const spyTx = vi.spyOn(db, 'transaction').mockImplementation(async (cb) => (cb as (tx: unknown) => unknown)(mockTx));
 
       const res = await withAuthenticatedUser(async ({ perfil, tx }) => {
         expect(perfil).toEqual(estudanteMock);
@@ -127,7 +129,7 @@ describe('RLS Context Integration Helpers', () => {
       const mockTx = {
         execute: vi.fn().mockResolvedValue([])
       };
-      const spyTx = vi.spyOn(db, 'transaction').mockImplementation(async (cb: any) => cb(mockTx));
+      const spyTx = vi.spyOn(db, 'transaction').mockImplementation(async (cb) => (cb as (tx: unknown) => unknown)(mockTx));
 
       const res = await withStudentContext(async ({ perfil }) => {
         return perfil.papel;
@@ -168,7 +170,7 @@ describe('RLS Context Integration Helpers', () => {
       const mockTx = {
         execute: vi.fn().mockResolvedValue([])
       };
-      const spyTx = vi.spyOn(db, 'transaction').mockImplementation(async (cb: any) => cb(mockTx));
+      const spyTx = vi.spyOn(db, 'transaction').mockImplementation(async (cb) => (cb as (tx: unknown) => unknown)(mockTx));
 
       const res = await withResponsibleContext(async ({ perfil }) => {
         return perfil.papel;
@@ -192,6 +194,29 @@ describe('RLS Context Integration Helpers', () => {
       );
 
       expect(spyTx).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('applyRlsContext', () => {
+    it('valida argumentos obrigatórios perfilId e papel', async () => {
+      const mockTx = { execute: vi.fn() };
+      await expect(applyRlsContext(mockTx as unknown as DrizzleTransaction, '', 'estudante')).rejects.toThrow(
+        'RLS Context Error: perfilId é obrigatório'
+      );
+      await expect(applyRlsContext(mockTx as unknown as DrizzleTransaction, '10000000-0000-4000-8000-000000000001', 'admin')).rejects.toThrow(
+        'RLS Context Error: papel inválido'
+      );
+    });
+
+    it('executa SELECT medicina.set_context se tx.execute estiver disponível', async () => {
+      const mockTx = { execute: vi.fn().mockResolvedValue([]) };
+      await applyRlsContext(mockTx as unknown as DrizzleTransaction, '10000000-0000-4000-8000-000000000001', 'estudante');
+      expect(mockTx.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignora silenciosamente se tx.execute não estiver disponível', async () => {
+      const mockTx = {};
+      await expect(applyRlsContext(mockTx as unknown as DrizzleTransaction, '10000000-0000-4000-8000-000000000001', 'responsavel')).resolves.toBeUndefined();
     });
   });
 });

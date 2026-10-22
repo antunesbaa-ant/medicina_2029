@@ -177,9 +177,47 @@ SELECT
 FROM public.acervo_arquivos a
 ON CONFLICT (arquivo_id) DO NOTHING;
 
--- 5. PRIVILÉGIOS E RLS COMPATÍVEIS (QUANDO OS PAPÉIS DA F1.04 ESTIVEREM PRESENTES)
+-- 5. PRIVILÉGIOS, PAPEL DE WORKER DE MÍNIMO PRIVILÉGIO (`medicina_worker`) E RLS COMPATÍVEL
 DO $$
 BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_worker') THEN
+    CREATE ROLE medicina_worker WITH NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE LOGIN;
+  END IF;
+
+  -- Privilégios estritos de mínimo privilégio para o worker independente:
+  -- acesso apenas às tabelas da fila/pipeline de ingestão e taxonomia de classificação.
+  GRANT USAGE ON SCHEMA public TO medicina_worker;
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM medicina_worker;
+  GRANT SELECT, INSERT, UPDATE, DELETE ON public.acervo_jobs TO medicina_worker;
+  GRANT SELECT, UPDATE ON public.acervo_arquivos TO medicina_worker;
+  GRANT SELECT, INSERT, UPDATE ON public.acervo_paginas TO medicina_worker;
+  GRANT SELECT, INSERT, UPDATE ON public.acervo_chunks TO medicina_worker;
+  GRANT SELECT ON public.topicos, public.disciplinas TO medicina_worker;
+
+  IF to_regnamespace('medicina') IS NOT NULL THEN
+    GRANT USAGE ON SCHEMA medicina TO medicina_worker;
+    IF to_regprocedure('medicina.current_perfil_id()') IS NOT NULL THEN
+      GRANT EXECUTE ON FUNCTION medicina.current_perfil_id() TO medicina_worker;
+    END IF;
+    IF to_regprocedure('medicina.current_papel()') IS NOT NULL THEN
+      GRANT EXECUTE ON FUNCTION medicina.current_papel() TO medicina_worker;
+    END IF;
+    IF to_regprocedure('medicina.is_estudante()') IS NOT NULL THEN
+      GRANT EXECUTE ON FUNCTION medicina.is_estudante() TO medicina_worker;
+    END IF;
+    IF to_regprocedure('medicina.is_responsavel()') IS NOT NULL THEN
+      GRANT EXECUTE ON FUNCTION medicina.is_responsavel() TO medicina_worker;
+    END IF;
+  END IF;
+
+  IF to_regclass('storage.objects') IS NOT NULL THEN
+    GRANT USAGE ON SCHEMA storage TO medicina_worker;
+    GRANT SELECT ON storage.buckets, storage.objects TO medicina_worker;
+    IF to_regprocedure('medicina.is_valid_acervo_storage_path(text)') IS NOT NULL THEN
+      GRANT EXECUTE ON FUNCTION medicina.is_valid_acervo_storage_path(text) TO medicina_worker;
+    END IF;
+  END IF;
+
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_app') THEN
     GRANT SELECT, INSERT, UPDATE, DELETE ON public.acervo_jobs TO medicina_app;
   END IF;
@@ -188,7 +226,8 @@ BEGIN
   END IF;
 
   -- Se o RLS já estiver habilitado em public.acervo_arquivos (F1.04 aplicada),
-  -- habilita RLS fail-closed equivalente em public.acervo_jobs.
+  -- habilita RLS fail-closed equivalente em public.acervo_jobs e adiciona policies
+  -- restritas ao papel `medicina_worker` exclusivamente nas tabelas do pipeline.
   IF EXISTS (
     SELECT 1
     FROM pg_class c
@@ -212,6 +251,52 @@ BEGIN
         medicina.is_responsavel()
         AND enviado_por = medicina.current_perfil_id()
       );
+
+    DROP POLICY IF EXISTS acervo_jobs_worker_all ON public.acervo_jobs;
+    CREATE POLICY acervo_jobs_worker_all
+      ON public.acervo_jobs
+      FOR ALL
+      USING (current_user = 'medicina_worker')
+      WITH CHECK (current_user = 'medicina_worker');
+
+    DROP POLICY IF EXISTS acervo_arquivos_worker_select_policy ON public.acervo_arquivos;
+    CREATE POLICY acervo_arquivos_worker_select_policy
+      ON public.acervo_arquivos
+      FOR SELECT
+      USING (current_user = 'medicina_worker');
+
+    DROP POLICY IF EXISTS acervo_arquivos_worker_update_policy ON public.acervo_arquivos;
+    CREATE POLICY acervo_arquivos_worker_update_policy
+      ON public.acervo_arquivos
+      FOR UPDATE
+      USING (current_user = 'medicina_worker')
+      WITH CHECK (current_user = 'medicina_worker');
+
+    DROP POLICY IF EXISTS acervo_paginas_worker_all_policy ON public.acervo_paginas;
+    CREATE POLICY acervo_paginas_worker_all_policy
+      ON public.acervo_paginas
+      FOR ALL
+      USING (current_user = 'medicina_worker')
+      WITH CHECK (current_user = 'medicina_worker');
+
+    DROP POLICY IF EXISTS acervo_chunks_worker_all_policy ON public.acervo_chunks;
+    CREATE POLICY acervo_chunks_worker_all_policy
+      ON public.acervo_chunks
+      FOR ALL
+      USING (current_user = 'medicina_worker')
+      WITH CHECK (current_user = 'medicina_worker');
+
+    DROP POLICY IF EXISTS topicos_worker_select_policy ON public.topicos;
+    CREATE POLICY topicos_worker_select_policy
+      ON public.topicos
+      FOR SELECT
+      USING (current_user = 'medicina_worker');
+
+    DROP POLICY IF EXISTS disciplinas_worker_select_policy ON public.disciplinas;
+    CREATE POLICY disciplinas_worker_select_policy
+      ON public.disciplinas
+      FOR SELECT
+      USING (current_user = 'medicina_worker');
   END IF;
 END
 $$;

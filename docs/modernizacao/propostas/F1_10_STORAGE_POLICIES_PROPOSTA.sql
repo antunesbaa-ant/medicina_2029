@@ -109,6 +109,15 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION medicina.is_estudante()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SET search_path = public, medicina, pg_temp
+AS $$
+  SELECT COALESCE(medicina.current_papel() = 'estudante' AND medicina.current_perfil_id() IS NOT NULL, false);
+$$;
+
 CREATE OR REPLACE FUNCTION medicina.is_responsavel()
 RETURNS boolean
 LANGUAGE sql
@@ -134,15 +143,34 @@ AS $$
     AND p_name ~ '^acervo/[0-9a-f]{64}(_[A-Za-z0-9._-]+)?\.pdf$';
 $$;
 
+REVOKE ALL ON FUNCTION medicina.current_perfil_id() FROM PUBLIC;
+REVOKE ALL ON FUNCTION medicina.current_papel() FROM PUBLIC;
+REVOKE ALL ON FUNCTION medicina.is_estudante() FROM PUBLIC;
+REVOKE ALL ON FUNCTION medicina.is_responsavel() FROM PUBLIC;
 REVOKE ALL ON FUNCTION medicina.is_valid_acervo_storage_path(text) FROM PUBLIC;
 
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_app') THEN
+    GRANT USAGE ON SCHEMA medicina TO medicina_app;
+    GRANT EXECUTE ON FUNCTION medicina.current_perfil_id() TO medicina_app;
+    GRANT EXECUTE ON FUNCTION medicina.current_papel() TO medicina_app;
+    GRANT EXECUTE ON FUNCTION medicina.is_estudante() TO medicina_app;
+    GRANT EXECUTE ON FUNCTION medicina.is_responsavel() TO medicina_app;
     GRANT USAGE ON SCHEMA storage TO medicina_app;
     GRANT SELECT ON storage.buckets TO medicina_app;
     GRANT SELECT, INSERT, DELETE ON storage.objects TO medicina_app;
     GRANT EXECUTE ON FUNCTION medicina.is_valid_acervo_storage_path(text) TO medicina_app;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_worker') THEN
+    GRANT USAGE ON SCHEMA medicina TO medicina_worker;
+    GRANT EXECUTE ON FUNCTION medicina.current_perfil_id() TO medicina_worker;
+    GRANT EXECUTE ON FUNCTION medicina.current_papel() TO medicina_worker;
+    GRANT EXECUTE ON FUNCTION medicina.is_estudante() TO medicina_worker;
+    GRANT EXECUTE ON FUNCTION medicina.is_responsavel() TO medicina_worker;
+    GRANT USAGE ON SCHEMA storage TO medicina_worker;
+    GRANT SELECT ON storage.buckets, storage.objects TO medicina_worker;
+    GRANT EXECUTE ON FUNCTION medicina.is_valid_acervo_storage_path(text) TO medicina_worker;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_anon') THEN
     REVOKE ALL ON SCHEMA storage FROM medicina_anon;
@@ -184,17 +212,18 @@ ALTER TABLE storage.objects FORCE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS acervo_buckets_select_authenticated ON storage.buckets;
 DROP POLICY IF EXISTS acervo_objects_responsavel_select ON storage.objects;
+DROP POLICY IF EXISTS acervo_objects_worker_select ON storage.objects;
 DROP POLICY IF EXISTS acervo_objects_responsavel_insert ON storage.objects;
 DROP POLICY IF EXISTS acervo_objects_responsavel_delete_unlinked ON storage.objects;
 
--- 5.1 Leitura de metadados do bucket restrita a perfis autenticados e bucket privado
+-- 5.1 Leitura de metadados do bucket restrita a perfis autenticados (ou worker) e bucket privado
 CREATE POLICY acervo_buckets_select_authenticated
   ON storage.buckets
   FOR SELECT
   USING (
     id = 'acervo'
     AND public = false
-    AND medicina.current_perfil_id() IS NOT NULL
+    AND (medicina.current_perfil_id() IS NOT NULL OR current_user = 'medicina_worker')
   );
 
 -- 5.2 Leitura de objetos do acervo restrita ao responsável proprietário
@@ -213,6 +242,21 @@ CREATE POLICY acervo_objects_responsavel_select
         WHERE a.file_path = storage.objects.name
           AND a.enviado_por = medicina.current_perfil_id()
       )
+    )
+  );
+
+-- 5.2.1 Leitura somente-leitura para o worker de ingestão sobre objetos registrados em acervo_arquivos
+CREATE POLICY acervo_objects_worker_select
+  ON storage.objects
+  FOR SELECT
+  USING (
+    bucket_id = 'acervo'
+    AND current_user = 'medicina_worker'
+    AND medicina.is_valid_acervo_storage_path(name)
+    AND EXISTS (
+      SELECT 1
+      FROM public.acervo_arquivos a
+      WHERE a.file_path = storage.objects.name
     )
   );
 

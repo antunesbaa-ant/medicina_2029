@@ -1,12 +1,16 @@
 import { defineConfig, devices } from '@playwright/test';
 
+export const E2E_NEXTAUTH_SECRET =
+  process.env.NEXTAUTH_SECRET ||
+  'medicina2029_e2e_jwt_secret_token_key_at_least_32_chars_long!';
+
 export default defineConfig({
   testDir: './e2e',
-  fullyParallel: true,
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  workers: 1,
+  reporter: 'list',
   use: {
     baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',
@@ -26,5 +30,9 @@ export default defineConfig({
     url: 'http://localhost:3000',
     reuseExistingServer: !process.env.CI,
     timeout: 120000,
+    env: {
+      NEXTAUTH_URL: 'http://localhost:3000',
+      NEXTAUTH_SECRET: E2E_NEXTAUTH_SECRET,
+    },
   },
 });

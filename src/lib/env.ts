@@ -15,11 +15,15 @@ export interface EnvValidationResult {
     DATABASE_URL?: string;
     DATABASE_APP_URL?: string;
     DATABASE_AUTH_URL?: string;
+    DATABASE_WORKER_URL?: string;
     NEXTAUTH_SECRET?: string;
     NEXTAUTH_URL?: string;
     GEMINI_API_KEY?: string;
+    GEMINI_EMBEDDING_MODEL?: string;
+    GEMINI_OCR_MODEL?: string;
     SUPABASE_URL?: string;
     SUPABASE_ANON_KEY?: string;
+    SUPABASE_SERVICE_ROLE_KEY?: string;
   };
 }
 
@@ -45,19 +49,23 @@ export function validateEnv(rawEnv: NodeJS.ProcessEnv = process.env): EnvValidat
 
   const isProd = nodeEnv === 'production';
   const isDev = nodeEnv === 'development';
-  const isTest = nodeEnv === 'test';
 
   const nextAuthSecret = rawEnv.NEXTAUTH_SECRET?.trim();
   const nextAuthUrl = rawEnv.NEXTAUTH_URL?.trim();
   const dbUrl = rawEnv.DATABASE_URL?.trim();
   const dbAppUrl = rawEnv.DATABASE_APP_URL?.trim();
   const dbAuthUrl = rawEnv.DATABASE_AUTH_URL?.trim();
+  const dbWorkerUrl = rawEnv.DATABASE_WORKER_URL?.trim();
   const geminiApiKey = rawEnv.GEMINI_API_KEY?.trim();
+  const geminiEmbeddingModel = rawEnv.GEMINI_EMBEDDING_MODEL?.trim();
+  const geminiOcrModel = rawEnv.GEMINI_OCR_MODEL?.trim();
   const anthropicApiKey = rawEnv.ANTHROPIC_API_KEY?.trim();
+  const openaiApiKey = rawEnv.OPENAI_API_KEY?.trim();
   const supabaseUrl = rawEnv.SUPABASE_URL?.trim();
   const supabaseAnonKey = rawEnv.SUPABASE_ANON_KEY?.trim();
+  const supabaseServiceRoleKey = rawEnv.SUPABASE_SERVICE_ROLE_KEY?.trim();
 
-  // 1. Verificação de Chave Cruzada de IA (Princípio da Segregação de Provedores)
+  // 1. Verificação de Chave Cruzada de IA e Exposição Indevida no Cliente (NEXT_PUBLIC_*)
   if (anthropicApiKey && !geminiApiKey) {
     const msg = 'Segregação de IA: ANTHROPIC_API_KEY não pode ser utilizada como substituta de GEMINI_API_KEY.';
     if (isProd) {
@@ -65,6 +73,20 @@ export function validateEnv(rawEnv: NodeJS.ProcessEnv = process.env): EnvValidat
     } else {
       warnings.push(msg);
     }
+  }
+  if (openaiApiKey && !geminiApiKey) {
+    const msg = 'Segregação de IA: OPENAI_API_KEY não pode ser utilizada como substituta de GEMINI_API_KEY.';
+    if (isProd) {
+      errors.push(msg);
+    } else {
+      warnings.push(msg);
+    }
+  }
+  if (rawEnv.NEXT_PUBLIC_GEMINI_API_KEY?.trim()) {
+    errors.push('Segurança: GEMINI_API_KEY nunca deve ser exposta com prefixo NEXT_PUBLIC_.');
+  }
+  if (rawEnv.NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY?.trim()) {
+    errors.push('Segurança: SUPABASE_SERVICE_ROLE_KEY nunca deve ser exposta com prefixo NEXT_PUBLIC_.');
   }
 
   // 2. Validação de NEXTAUTH_SECRET
@@ -114,6 +136,7 @@ export function validateEnv(rawEnv: NodeJS.ProcessEnv = process.env): EnvValidat
     checkLocalhost(dbUrl, 'DATABASE_URL');
     checkLocalhost(dbAppUrl, 'DATABASE_APP_URL');
     checkLocalhost(dbAuthUrl, 'DATABASE_AUTH_URL');
+    checkLocalhost(dbWorkerUrl, 'DATABASE_WORKER_URL');
   } else if (isDev && !hasDbUrl) {
     warnings.push('Nenhuma URL de banco de dados configurada (DATABASE_URL).');
   }
@@ -137,11 +160,15 @@ export function validateEnv(rawEnv: NodeJS.ProcessEnv = process.env): EnvValidat
       DATABASE_URL: dbUrl,
       DATABASE_APP_URL: dbAppUrl,
       DATABASE_AUTH_URL: dbAuthUrl,
+      DATABASE_WORKER_URL: dbWorkerUrl,
       NEXTAUTH_SECRET: nextAuthSecret,
       NEXTAUTH_URL: nextAuthUrl,
       GEMINI_API_KEY: geminiApiKey,
+      GEMINI_EMBEDDING_MODEL: geminiEmbeddingModel,
+      GEMINI_OCR_MODEL: geminiOcrModel,
       SUPABASE_URL: supabaseUrl,
       SUPABASE_ANON_KEY: supabaseAnonKey,
+      SUPABASE_SERVICE_ROLE_KEY: supabaseServiceRoleKey,
     }
   };
 }

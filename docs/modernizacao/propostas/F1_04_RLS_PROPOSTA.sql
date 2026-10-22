@@ -93,10 +93,10 @@ DECLARE
   v_val text;
 BEGIN
   v_val := current_setting('medicina.current_papel', true);
-  IF v_val IS NULL OR v_val = '' THEN
-    RETURN NULL;
+  IF v_val IN ('estudante', 'responsavel') THEN
+    RETURN v_val;
   END IF;
-  RETURN v_val;
+  RETURN NULL;
 EXCEPTION
   WHEN OTHERS THEN
     RETURN NULL;
@@ -110,7 +110,7 @@ LANGUAGE sql
 STABLE
 SET search_path = public, medicina, pg_temp
 AS $$
-  SELECT COALESCE(medicina.current_papel() = 'estudante', false);
+  SELECT COALESCE(medicina.current_papel() = 'estudante' AND medicina.current_perfil_id() IS NOT NULL, false);
 $$;
 
 CREATE OR REPLACE FUNCTION medicina.is_responsavel()
@@ -119,7 +119,7 @@ LANGUAGE sql
 STABLE
 SET search_path = public, medicina, pg_temp
 AS $$
-  SELECT COALESCE(medicina.current_papel() = 'responsavel', false);
+  SELECT COALESCE(medicina.current_papel() = 'responsavel' AND medicina.current_perfil_id() IS NOT NULL, false);
 $$;
 
 -- 2.4 Resolução do Estudante Gerenciado pelo Responsável Corrente
@@ -247,6 +247,18 @@ GRANT EXECUTE ON FUNCTION medicina.clear_context() TO medicina_app;
 
 -- Concessão explícita de EXECUTE em medicina.autenticar_por_email exclusivamente para medicina_auth
 GRANT EXECUTE ON FUNCTION medicina.autenticar_por_email(text) TO medicina_auth;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_worker') THEN
+    GRANT USAGE ON SCHEMA medicina TO medicina_worker;
+    GRANT EXECUTE ON FUNCTION medicina.current_perfil_id() TO medicina_worker;
+    GRANT EXECUTE ON FUNCTION medicina.current_papel() TO medicina_worker;
+    GRANT EXECUTE ON FUNCTION medicina.is_estudante() TO medicina_worker;
+    GRANT EXECUTE ON FUNCTION medicina.is_responsavel() TO medicina_worker;
+  END IF;
+END
+$$;
 
 -- 3.2 Permissões no schema public para medicina_app
 GRANT USAGE ON SCHEMA public TO medicina_app;
@@ -1187,5 +1199,54 @@ GRANT SELECT ON public.vw_revisoes_trimestrais TO medicina_app;
 
 GRANT EXECUTE ON FUNCTION medicina.fn_acompanhamento_quinzenal() TO medicina_app;
 GRANT EXECUTE ON FUNCTION medicina.fn_simulados_evolucao() TO medicina_app;
+
+-- ----------------------------------------------------------------------------
+-- 9. COMPATIBILIDADE CONDICIONAL COM TABELAS ADITIVAS (F1.09 / F1.11 / F1.12)
+-- ----------------------------------------------------------------------------
+DO $$
+BEGIN
+  IF to_regclass('public.operacoes_idempotentes') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.operacoes_idempotentes TO medicina_app;
+    REVOKE ALL ON public.operacoes_idempotentes FROM medicina_anon;
+
+    ALTER TABLE public.operacoes_idempotentes ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.operacoes_idempotentes FORCE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS operacoes_idempotentes_own_policy ON public.operacoes_idempotentes;
+    CREATE POLICY operacoes_idempotentes_own_policy
+      ON public.operacoes_idempotentes
+      FOR ALL
+      USING (
+        medicina.current_perfil_id() IS NOT NULL
+        AND perfil_id = medicina.current_perfil_id()
+      )
+      WITH CHECK (
+        medicina.current_perfil_id() IS NOT NULL
+        AND perfil_id = medicina.current_perfil_id()
+      );
+  END IF;
+
+  IF to_regclass('public.acervo_jobs') IS NOT NULL THEN
+    GRANT SELECT, INSERT, UPDATE, DELETE ON public.acervo_jobs TO medicina_app;
+    REVOKE ALL ON public.acervo_jobs FROM medicina_anon;
+
+    ALTER TABLE public.acervo_jobs ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE public.acervo_jobs FORCE ROW LEVEL SECURITY;
+
+    DROP POLICY IF EXISTS acervo_jobs_responsavel_all ON public.acervo_jobs;
+    CREATE POLICY acervo_jobs_responsavel_all
+      ON public.acervo_jobs
+      FOR ALL
+      USING (
+        medicina.is_responsavel()
+        AND enviado_por = medicina.current_perfil_id()
+      )
+      WITH CHECK (
+        medicina.is_responsavel()
+        AND enviado_por = medicina.current_perfil_id()
+      );
+  END IF;
+END
+$$;
 
 COMMIT;

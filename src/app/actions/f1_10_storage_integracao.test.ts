@@ -122,6 +122,16 @@ vi.mock('@supabase/supabase-js', () => ({
           simulatedBucket.removeCalls++;
           return { data: [], error: null };
         },
+        download: async (key: string) => {
+          const obj = simulatedBucket.objects.get(key);
+          if (!obj) {
+            return { data: null, error: { message: 'Object not found' } };
+          }
+          return {
+            data: new Blob([new Uint8Array(obj.body)], { type: obj.contentType }),
+            error: null,
+          };
+        },
       }),
     },
   })),

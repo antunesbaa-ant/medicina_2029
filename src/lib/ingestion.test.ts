@@ -35,6 +35,53 @@ describe('Motor de Ingestão - Ingestion Pipeline', () => {
       const paginas = await extrairTextoPDF(Buffer.from('PDF_DUMMY_DATA'));
       expect(paginas[0].metodo).toBe('nativo');
     });
+
+    it('aciona OCR para páginas digitalizadas sem texto nativo e preserva número exato da página (F1.12)', async () => {
+      const executarOcrDocumento = vi.fn().mockResolvedValue([
+        { numero: 2, texto: 'Página 2 digitalizada extraída via OCR.', confianca: 0.91 },
+      ]);
+
+      const paginas = await extrairTextoPDF(Buffer.from('PDF_SCAN'), {
+        parsePdfNativo: async () => ({
+          text: 'Página 1 digital nativa.\f   \fPágina 3 digital nativa.',
+          numpages: 3,
+        }),
+        executarOcrDocumento,
+      });
+
+      expect(executarOcrDocumento).toHaveBeenCalledWith(expect.any(Buffer), [2]);
+      expect(paginas).toEqual([
+        { numero: 1, texto: 'Página 1 digital nativa.', metodo: 'nativo', confianca: 0.5 },
+        { numero: 2, texto: 'Página 2 digitalizada extraída via OCR.', metodo: 'ocr', confianca: 0.91 },
+        { numero: 3, texto: 'Página 3 digital nativa.', metodo: 'nativo', confianca: 0.5 },
+      ]);
+    });
+
+    it('não inventa texto para página em branco e preserva o número original das páginas seguintes (F1.12)', async () => {
+      const paginas = await extrairTextoPDF(Buffer.from('PDF_BLANK_PAGE'), {
+        parsePdfNativo: async () => ({
+          text: 'Página 1 com conteúdo.\f\fPágina 3 após página em branco.',
+          numpages: 3,
+        }),
+        executarOcrDocumento: async () => [{ numero: 2, texto: '   ', confianca: 0 }],
+      });
+
+      expect(paginas).toEqual([
+        { numero: 1, texto: 'Página 1 com conteúdo.', metodo: 'nativo', confianca: 0.5 },
+        { numero: 3, texto: 'Página 3 após página em branco.', metodo: 'nativo', confianca: 0.5 },
+      ]);
+    });
+
+    it('propaga falha de OCR sem inventar texto (F1.12)', async () => {
+      await expect(
+        extrairTextoPDF(Buffer.from('PDF_SCAN_FAIL'), {
+          parsePdfNativo: async () => ({ text: '', numpages: 1 }),
+          executarOcrDocumento: async () => {
+            throw new Error('OCR service timeout');
+          },
+        })
+      ).rejects.toThrow('OCR service timeout');
+    });
   });
 
   // 2. Segmentação Semântica
