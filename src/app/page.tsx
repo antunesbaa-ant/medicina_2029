@@ -8,7 +8,13 @@ import { requireAuthenticatedProfile } from '../lib/authorization';
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  const perfil = await requireAuthenticatedProfile();
+  let perfil;
+  try {
+    perfil = await requireAuthenticatedProfile();
+  } catch {
+    redirect('/login');
+  }
+
   if (perfil.papel === 'responsavel') {
     redirect('/responsavel');
   }

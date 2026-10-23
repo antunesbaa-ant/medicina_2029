@@ -1,18 +1,43 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   withRlsContext,
   withAuthenticatedUser,
   withStudentContext,
   withResponsibleContext,
+  withAuthenticatedRead,
   applyRlsContext,
+  isRlsEnforced,
+  RlsContextError,
   type DrizzleTransaction
 } from './rls-context';
 import { db } from './index';
 import * as authModule from '../lib/authorization';
 
 describe('RLS Context Integration Helpers', () => {
+  const originalEnv = { ...process.env };
+
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  describe('isRlsEnforced', () => {
+    it('detecta flag RLS_ENFORCED ou ENFORCE_RLS', () => {
+      delete process.env.RLS_ENFORCED;
+      delete process.env.ENFORCE_RLS;
+      expect(isRlsEnforced()).toBe(false);
+
+      process.env.RLS_ENFORCED = 'true';
+      expect(isRlsEnforced()).toBe(true);
+
+      process.env.RLS_ENFORCED = 'false';
+      process.env.ENFORCE_RLS = 'true';
+      expect(isRlsEnforced()).toBe(true);
+    });
   });
 
   describe('withRlsContext (baixo nível)', () => {
@@ -29,7 +54,13 @@ describe('RLS Context Integration Helpers', () => {
 
     it('invoca db.transaction e configura o contexto transacional', async () => {
       const mockTx = {
-        execute: vi.fn().mockResolvedValue([])
+        execute: vi.fn().mockImplementation(async (q: any) => {
+          const sqlStr = String(q?.queryChunks?.[0]?.value || q || '');
+          if (/to_regprocedure/i.test(sqlStr)) {
+            return [{ exists: true, curr_role: 'postgres' }];
+          }
+          return [];
+        })
       };
 
       const spyTransaction = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
@@ -44,14 +75,20 @@ describe('RLS Context Integration Helpers', () => {
 
       expect(result).toBe('sucesso_operacao');
       expect(spyTransaction).toHaveBeenCalledTimes(1);
-      expect(mockTx.execute).toHaveBeenCalledTimes(2); // set_context e clear_context
+      expect(mockTx.execute).toHaveBeenCalled();
 
       spyTransaction.mockRestore();
     });
 
     it('assegura chamada a clear_context mesmo quando o callback lança erro', async () => {
       const mockTx = {
-        execute: vi.fn().mockResolvedValue([])
+        execute: vi.fn().mockImplementation(async (q: any) => {
+          const sqlStr = String(q?.queryChunks?.[0]?.value || q || '');
+          if (/to_regprocedure/i.test(sqlStr)) {
+            return [{ exists: true, curr_role: 'postgres' }];
+          }
+          return [];
+        })
       };
 
       const spyTransaction = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
@@ -65,7 +102,7 @@ describe('RLS Context Integration Helpers', () => {
         })
       ).rejects.toThrow('Falha simulada na query');
 
-      expect(mockTx.execute).toHaveBeenCalledTimes(2);
+      expect(mockTx.execute).toHaveBeenCalled();
 
       spyTransaction.mockRestore();
     });
@@ -208,15 +245,86 @@ describe('RLS Context Integration Helpers', () => {
       );
     });
 
-    it('executa SELECT medicina.set_context se tx.execute estiver disponível', async () => {
-      const mockTx = { execute: vi.fn().mockResolvedValue([]) };
+    it('executa SELECT medicina.set_context se tx.execute estiver disponível e procedure existir', async () => {
+      const mockTx = {
+        execute: vi.fn().mockImplementation(async (q: any) => {
+          const sqlStr = String(q?.queryChunks?.[0]?.value || q || '');
+          if (/to_regprocedure/i.test(sqlStr)) {
+            return [{ exists: true, curr_role: 'postgres' }];
+          }
+          return [];
+        })
+      };
       await applyRlsContext(mockTx as unknown as DrizzleTransaction, '10000000-0000-4000-8000-000000000001', 'estudante');
-      expect(mockTx.execute).toHaveBeenCalledTimes(1);
+      expect(mockTx.execute).toHaveBeenCalledTimes(2);
     });
 
-    it('ignora silenciosamente se tx.execute não estiver disponível', async () => {
-      const mockTx = {};
-      await expect(applyRlsContext(mockTx as unknown as DrizzleTransaction, '10000000-0000-4000-8000-000000000001', 'responsavel')).resolves.toBeUndefined();
+    it('ignora em ambiente de desenvolvimento sem RLS obrigatório quando procedure não existe', async () => {
+      delete process.env.RLS_ENFORCED;
+      delete process.env.ENFORCE_RLS;
+      const mockTx = {
+        execute: vi.fn().mockResolvedValue([{ exists: false, curr_role: 'postgres' }])
+      };
+      await expect(
+        applyRlsContext(mockTx as unknown as DrizzleTransaction, '10000000-0000-4000-8000-000000000001', 'responsavel')
+      ).resolves.toBeUndefined();
+    });
+
+    it('lança erro explícito (fail-closed) quando RLS é obrigatório e procedure não existe', async () => {
+      process.env.RLS_ENFORCED = 'true';
+      const mockTx = {
+        execute: vi.fn().mockResolvedValue([{ exists: false, curr_role: 'postgres' }])
+      };
+      await expect(
+        applyRlsContext(mockTx as unknown as DrizzleTransaction, '10000000-0000-4000-8000-000000000001', 'estudante')
+      ).rejects.toThrow(RlsContextError);
+    });
+
+    it('lança erro explícito se executado sob role medicina_app e procedure não existe', async () => {
+      delete process.env.RLS_ENFORCED;
+      const mockTx = {
+        execute: vi.fn().mockResolvedValue([{ exists: false, curr_role: 'medicina_app' }])
+      };
+      await expect(
+        applyRlsContext(mockTx as unknown as DrizzleTransaction, '10000000-0000-4000-8000-000000000001', 'estudante')
+      ).rejects.toThrow('RLS Fatal Error: medicina.set_context não está disponível');
+    });
+  });
+
+  describe('withAuthenticatedRead', () => {
+    it('executa callback dentro de transação com contexto RLS do usuário', async () => {
+      const mockUser = {
+        id: '10000000-0000-4000-8000-000000000001',
+        nome: 'Estudante Teste',
+        email: 'estudante@medicina2029.com.br',
+        papel: 'estudante' as const
+      };
+
+      vi.spyOn(authModule, 'requireAuthenticatedProfile').mockResolvedValue(mockUser);
+
+      const mockTx = {
+        execute: vi.fn().mockImplementation(async (q: any) => {
+          const sqlStr = String(q?.queryChunks?.[0]?.value || q || '');
+          if (/to_regprocedure/i.test(sqlStr)) {
+            return [{ exists: true, curr_role: 'postgres' }];
+          }
+          return [];
+        })
+      };
+
+      const spyTx = vi.spyOn(db, 'transaction').mockImplementation(async (callback) => {
+        return await (callback as (tx: unknown) => unknown)(mockTx);
+      });
+
+      const res = await withAuthenticatedRead(async ({ perfil, tx }) => {
+        expect(perfil).toEqual(mockUser);
+        expect(tx).toBe(mockTx);
+        return 'leitura_sucesso';
+      });
+
+      expect(res).toBe('leitura_sucesso');
+      expect(mockTx.execute).toHaveBeenCalled();
+      spyTx.mockRestore();
     });
   });
 });

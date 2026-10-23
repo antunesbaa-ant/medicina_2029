@@ -2,10 +2,9 @@
 
 import { useState, Suspense } from 'react';
 import { signIn } from 'next-auth/react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -33,8 +32,8 @@ function LoginForm() {
             : (res?.error || 'E-mail ou senha incorretos.')
         );
       } else {
-        router.push('/');
-        router.refresh();
+        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+        window.location.href = '/';
       }
     } catch {
       setErro('Ocorreu um erro ao tentar fazer login. Tente novamente.');

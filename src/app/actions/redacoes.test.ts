@@ -49,7 +49,8 @@ vi.mock('../../db', () => {
     groupBy: vi.fn().mockReturnThis(),
     orderBy: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
-    then: (resolve: (value: unknown[]) => unknown) => resolve([])
+    then: (resolve: (value: unknown[]) => unknown) => resolve([]),
+    transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(queryBuilder))
   };
   return { db: queryBuilder };
 });

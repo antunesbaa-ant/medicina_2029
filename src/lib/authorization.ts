@@ -1,5 +1,5 @@
 import { getServerSession, type Session } from 'next-auth';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { db } from '../db';
 import { perfis, responsavelEstudante } from '../db/schema';
 import { authOptions } from './auth-options';
@@ -42,6 +42,11 @@ function sessionProfileId(session: Session | null): string | null {
   return typeof user?.id === 'string' && user.id.length > 0 ? user.id : null;
 }
 
+function sessionProfileRole(session: Session | null): Papel | null {
+  const user = session?.user as (Session['user'] & { role?: unknown }) | undefined;
+  return user?.role === 'estudante' || user?.role === 'responsavel' ? user.role : null;
+}
+
 export async function requireAuthenticatedProfile(): Promise<AuthorizedProfile> {
   let session: Session | null;
 
@@ -56,12 +61,44 @@ export async function requireAuthenticatedProfile(): Promise<AuthorizedProfile> 
     throw new AuthorizationError('UNAUTHENTICATED');
   }
 
+  const sessionRole = sessionProfileRole(session);
+  let perfil: AuthorizedProfile | undefined;
+
   try {
-    const [perfil] = await db
+    // 1. Consulta direta eficiente sem sobrecarga transacional
+    const [row] = await db
       .select(authorizedProfileSelection)
       .from(perfis)
       .where(eq(perfis.id, perfilId))
       .limit(1);
+    perfil = row;
+
+    // 2. Se não retornou linhas (ex: ambiente com FORCE RLS sob medicina_app),
+    // estabelece contexto RLS transacional derivado estritamente da sessão NextAuth
+    if (!perfil && sessionRole) {
+      try {
+        perfil = await db.transaction(async (tx) => {
+          const check = await tx.execute(
+            sql`SELECT to_regprocedure('medicina.set_context(uuid, text)') IS NOT NULL AS exists;`
+          );
+          const rows = Array.isArray(check) ? check : (check as { rows?: unknown[] })?.rows ?? [];
+          const firstRow = rows[0] as Record<string, unknown> | undefined;
+          const hasFn = Boolean(firstRow?.exists);
+          if (hasFn) {
+            await tx.execute(sql`SELECT medicina.set_context(${perfilId}::uuid, ${sessionRole}::text);`);
+          }
+
+          const [rlsRow] = await tx
+            .select(authorizedProfileSelection)
+            .from(perfis)
+            .where(eq(perfis.id, perfilId))
+            .limit(1);
+          return rlsRow;
+        });
+      } catch {
+        // Fallback defensivo
+      }
+    }
 
     if (!perfil) {
       throw new AuthorizationError('UNAUTHENTICATED');

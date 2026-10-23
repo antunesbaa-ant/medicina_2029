@@ -89,6 +89,8 @@ await db.exec(`
 
 console.log('✅ Base de dados preparada com sucesso!');
 
+let protocolQueue = Promise.resolve();
+
 const server = net.createServer(async (socket) => {
   try {
     await fromNodeSocket(socket, {
@@ -103,10 +105,12 @@ const server = net.createServer(async (socket) => {
       onMessage: async (data, { isAuthenticated }) => {
         if (!isAuthenticated) return;
         try {
-          const results = await db.execProtocol(data);
+          const run = protocolQueue.then(() => db.execProtocol(data));
+          protocolQueue = run.catch(() => {});
+          const results = await run;
           return results.data;
         } catch (err) {
-          console.error('execProtocol error:', err);
+          console.error('execProtocol error details:', err);
         }
       }
     });

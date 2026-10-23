@@ -16,6 +16,33 @@ export interface AuthenticatedContext {
   tx: DrizzleTransaction;
 }
 
+export class RlsContextError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RlsContextError';
+  }
+}
+
+/**
+ * Determina se o ambiente exige compulsoriamente a aplicação de políticas RLS.
+ * Precedência:
+ * 1. Variáveis de ambiente explícitas RLS_ENFORCED ou ENFORCE_RLS ('true'/'1').
+ * 2. Ambiente de produção em tempo de execução (NODE_ENV === 'production' fora da fase de build).
+ */
+export function isRlsEnforced(): boolean {
+  if (
+    process.env.RLS_ENFORCED === 'true' ||
+    process.env.ENFORCE_RLS === 'true' ||
+    process.env.RLS_ENFORCED === '1'
+  ) {
+    return true;
+  }
+  if (process.env.NODE_ENV === 'production' && process.env.NEXT_PHASE !== 'phase-production-build') {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Executa uma operação no banco de dados sob o contexto RLS do usuário autenticado.
  *
@@ -37,8 +64,8 @@ export async function withAuthenticatedUser<T>(
 
   // b) Abre a transação Drizzle
   return await db.transaction(async (tx) => {
-    // c) Executa SET LOCAL transacional
-    await tx.execute(sql`SELECT medicina.set_context(${perfil.id}::uuid, ${perfil.papel}::text);`);
+    // c) Executa SET LOCAL transacional via helper defensivo
+    await applyRlsContext(tx, perfil.id, perfil.papel);
 
     try {
       // d) Invoca o callback seguro
@@ -64,7 +91,7 @@ export async function withStudentContext<T>(
   const perfil = await requireRole('estudante');
 
   return await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT medicina.set_context(${perfil.id}::uuid, ${perfil.papel}::text);`);
+    await applyRlsContext(tx, perfil.id, perfil.papel);
 
     try {
       return await callback({ perfil, tx });
@@ -86,7 +113,7 @@ export async function withResponsibleContext<T>(
   const perfil = await requireRole('responsavel');
 
   return await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT medicina.set_context(${perfil.id}::uuid, ${perfil.papel}::text);`);
+    await applyRlsContext(tx, perfil.id, perfil.papel);
 
     try {
       return await callback({ perfil, tx });
@@ -101,6 +128,11 @@ export async function withResponsibleContext<T>(
 /**
  * Aplica o contexto RLS (SET LOCAL via medicina.set_context) a uma transação Drizzle já existente.
  * Utilizado por Server Actions que gerenciam seu próprio ciclo transacional (ex: advisory locks).
+ *
+ * Em conformidade com a diretriz H0.01:
+ * - Em ambientes configurados para RLS (isRlsEnforced() === true ou role medicina_app),
+ *   a ausência da procedure medicina.set_context lança erro explícito (RlsContextError),
+ *   eliminando integralmente o fallback silencioso.
  */
 export async function applyRlsContext(
   tx: DrizzleTransaction,
@@ -108,34 +140,67 @@ export async function applyRlsContext(
   papel: string
 ): Promise<void> {
   if (!perfilId || typeof perfilId !== 'string') {
-    throw new Error('RLS Context Error: perfilId é obrigatório e deve ser uma string UUID válida.');
+    throw new RlsContextError('RLS Context Error: perfilId é obrigatório e deve ser uma string UUID válida.');
   }
   if (papel !== 'estudante' && papel !== 'responsavel') {
-    throw new Error(`RLS Context Error: papel inválido "${papel}". Esperado "estudante" ou "responsavel".`);
+    throw new RlsContextError(`RLS Context Error: papel inválido "${papel}". Esperado "estudante" ou "responsavel".`);
   }
 
+  const rlsMandatorio = isRlsEnforced();
+
   if (typeof (tx as unknown as { execute?: unknown }).execute === 'function') {
+    const executor = tx as unknown as { execute: (q: unknown) => Promise<unknown> };
+
     try {
-      const checkResult = await (tx as unknown as { execute: (q: unknown) => Promise<unknown> }).execute(
-        sql`SELECT to_regprocedure('medicina.set_context(uuid, text)') IS NOT NULL AS exists;`
+      const checkResult = await executor.execute(
+        sql`SELECT
+              to_regprocedure('medicina.set_context(uuid, text)') IS NOT NULL AS exists,
+              current_user AS curr_role;`
       );
       const rows = Array.isArray(checkResult)
         ? checkResult
         : (checkResult as { rows?: unknown[] })?.rows ?? [];
       const firstRow = rows[0] as Record<string, unknown> | undefined;
       const hasSetContext = Boolean(firstRow?.exists === true || firstRow?.exists === 't');
+      const isMedicinaAppRole = firstRow?.curr_role === 'medicina_app';
 
-      if (hasSetContext) {
-        await tx.execute(sql`SELECT medicina.set_context(${perfilId}::uuid, ${papel}::text);`);
+      if (!hasSetContext) {
+        if (rlsMandatorio || isMedicinaAppRole) {
+          throw new RlsContextError(
+            'RLS Fatal Error: medicina.set_context não está disponível no banco de dados. Execução abortada por princípio fail-closed.'
+          );
+        }
+        return;
       }
+
+      await tx.execute(sql`SELECT medicina.set_context(${perfilId}::uuid, ${papel}::text);`);
     } catch (err: unknown) {
+      if (err instanceof RlsContextError) {
+        throw err;
+      }
+
       const errMsg = err instanceof Error ? err.message : String(err ?? '');
+      if (rlsMandatorio) {
+        throw new RlsContextError(`RLS Fatal Error ao ativar contexto de segurança: ${errMsg}`);
+      }
+
       if (/to_regprocedure/i.test(errMsg)) {
         return;
       }
       throw err;
     }
+  } else if (rlsMandatorio) {
+    throw new RlsContextError('RLS Context Error: tx.execute indisponível em transação sob ambiente RLS obrigatório.');
   }
+}
+
+/**
+ * Envelopa consultas essenciais de leitura sob transação com contexto RLS do usuário autenticado.
+ */
+export async function withAuthenticatedRead<T>(
+  callback: (ctx: AuthenticatedContext) => Promise<T>
+): Promise<T> {
+  return await withAuthenticatedUser(callback);
 }
 
 /**
@@ -149,14 +214,14 @@ export async function withRlsContext<T>(
   callback: (tx: DrizzleTransaction) => Promise<T>
 ): Promise<T> {
   if (!perfilId || typeof perfilId !== 'string') {
-    throw new Error('RLS Context Error: perfilId é obrigatório e deve ser uma string UUID válida.');
+    throw new RlsContextError('RLS Context Error: perfilId é obrigatório e deve ser uma string UUID válida.');
   }
   if (papel !== 'estudante' && papel !== 'responsavel') {
-    throw new Error(`RLS Context Error: papel inválido "${papel}". Esperado "estudante" ou "responsavel".`);
+    throw new RlsContextError(`RLS Context Error: papel inválido "${papel}". Esperado "estudante" ou "responsavel".`);
   }
 
   return await db.transaction(async (tx) => {
-    await tx.execute(sql`SELECT medicina.set_context(${perfilId}::uuid, ${papel}::text);`);
+    await applyRlsContext(tx, perfilId, papel);
 
     try {
       return await callback(tx);

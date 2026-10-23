@@ -412,10 +412,32 @@ O sistema só deve receber dados reais quando todos os itens abaixo estiverem co
 
 Todas as 15 etapas de modernização foram executadas, validadas e homologadas em bancos PostgreSQL 18.6 descartáveis (PGlite com `pgvector`), sem alteração ou acesso prematuro a instâncias persistentes ou ambientes de produção.
 
-**Próximo marco recomendado:** Homologação Operacional em Ambiente Dedicado de Staging, compreendendo:
-1. Provisionamento de PostgreSQL remoto dedicado com extensão `vector`.
-2. Criação das roles `medicina_auth`, `medicina_app`, `medicina_worker` e `medicina_anon`.
-3. Execução das migrações e propostas SQL em janela autorizada (`0000..0003`, `F1.04`, `F1.09`, `F1.10`, `F1.11`, `F1.12`).
-4. Ativação de `FORCE ROW LEVEL SECURITY`.
-5. Drill de simulação de desastre (backup, decifragem, restore e saneamento auditado com medição cronometrada de RTO e RPO).
-6. Execução das suítes de teste de integração e Playwright contra o ambiente de staging.
+### H0.01 — Verificação Final para Homologação
+Concluída em 22/10/2026 com decisão formal: **APTO PARA INICIAR HOMOLOGAÇÃO EM STAGING**. RLS fail-closed integrado, substituição de AES-256-CBC por AEAD AES-256-GCM (`M29G`), e suíte Playwright real E2E com PostgreSQL descartável aprovada.
+
+### H1.01 / H1.01-R — Planejamento e Revisão do Ambiente de Homologação (Staging)
+Concluídos em 22/10/2026 como **PLANEJAMENTO HOMOLOGADO PARA DECISÃO HUMANA**:
+1. **Infraestrutura e Custo Inicial Zero:** Homologação preliminar viável a R$ 0,00/mês utilizando Vercel Hobby, Supabase Free Tier (500MB DB / 1GB storage / pgvector), Google AI Studio (Gemini 2.5 Flash / gemini-embedding-001) e execução de worker e rotinas de backup/restore sob demanda (via script CLI local ou GitHub Actions com runner Ubuntu gratuito), postergando contratação de VM persistente dedicada para fase posterior se e quando necessário.
+2. **Isolamento Estrito Fail-Closed:** Validação baseada em identificadores inequívocos de projeto Supabase e assinatura de ambiente (`CONFIRM_ISOLATED_STAGING_ENVIRONMENT=true`), sem confiar em comparações frágeis de nomes de host;
+3. **Paridade com Código e SQL:** Fixação do bucket `acervo` no projeto isolado de staging, validação de paths via `medicina.is_valid_acervo_storage_path` (`^acervo/[0-9a-f]{64}(_[A-Za-z0-9._-]+)?\.pdf$`), e alinhamento dos modelos reais Gemini (`gemini-2.5-flash` para geração/curadoria/OCR e `gemini-embedding-001` para embeddings 1536-d).
+4. **Matriz Real de Papéis:** `medicina_auth` restrito à execução de `medicina.autenticar_por_email` (sem SELECT direto em `password_hash`); `medicina_app` com leitura negada de `password_hash` (erro 42501); `medicina_worker` restrito às 6 tabelas do pipeline (sem privilégios em `geracoes` ou `curadoria_fila`).
+5. **Dados Sintéticos Canônicos:** Seed sintético com UUIDs v4 válidos RFC 4122 (`10000000-0000-4000-8000-000000000001` para Alice, `20000000-0000-4000-8000-000000000001` para Bruno) e hashes matematicamente correlacionados aos bytes dos arquivos didáticos de teste.
+
+### H1.02 — Preparação Local e Segura do Staging
+Concluída em 22/10/2026 como **APROVADA E HOMOLOGADA**:
+1. **Guardião de Isolamento Fail-Closed (`src/lib/envGuard.ts`):** Implementado e integrado ao boot do Next.js (`src/instrumentation.ts`), banco de dados (`src/db/index.ts`) e worker (`src/lib/acervoPipelineWorker.ts`). Exige identificador explícito do projeto Supabase (`STAGING_SUPABASE_PROJECT_REF`), valida coerência estrutural das conexões de banco e storage, rejeita identificadores de produção, audita credenciais obrigatórias e oculta senhas/tokens em logs. Preserva 100% dos testes e ambientes de desenvolvimento locais.
+2. **Carga Idempotente de Dados Sintéticos (`src/db/seed-staging.ts`):** Implementada com identidades fictícias Alice e Bruno (UUIDs válidos RFC 4122 v4), vínculo de responsabilidade, allowlist anti-enumeração prévia, ciclo pedagógico com 28 blocos estruturados, 6 cards FSRS cobrindo todos os estados do algoritmo e 3 PDFs didáticos sintéticos válidos (especificação PDF-1.4) com cálculo determinístico de SHA-256 e tamanho exato a partir dos bytes reais. Bloqueio fail-closed contra execução em produção ou sem autorização explícita (`CONFIRM_STAGING_SEED=true`).
+3. **Worker sob Demanda sem VM Permanente (`src/lib/workerOnDemand.ts` e `scripts/worker/run-on-demand.mjs`):** Implementado com limites estritos configuráveis de jobs e tempo máximo seguro (`maxJobs`, `maxDurationMs`), encerramento limpo em fila vazia e integração ao guardião de staging.
+4. **Validação Rigorosa:** Suíte direcionada `src/app/actions/h1_02_staging_preparacao.test.ts` (18/18 testes aprovados), Vitest integral (36 arquivos, 329 testes aprovados), Next.js build com Turbopack (0 erros), TypeScript (0 erros), Drizzle check íntegro, ESLint (0 erros/avisos), git diff --check (0 erros) e suíte RLS (41/41 cenários aprovados).
+
+### H1.03 — Preflight de Ativação do Staging
+Concluída em 22/10/2026 com decisão formal: **APTO PARA PROVISIONAMENTO MANUAL DE STAGING**:
+1. **Verificação de `envGuard` nos Caminhos Reais:** Integrado e validado no boot (`instrumentation.ts`), conexão de banco (`db/index.ts`), worker sob demanda (`workerOnDemand.ts`), pipeline worker (`acervoPipelineWorker.ts`), Drizzle kit (`drizzle.config.ts`) e runner controlado de migrações (`scripts/db/migrate-staging.mjs`).
+2. **Distinção entre Staging Publicado e Produção Real:** Validação de `APP_ENV=staging` com `NODE_ENV=production` aprovada quando há projeto e credenciais legítimas de staging. Bloqueio sumário e intransponível se `APP_ENV=production`, rejeitando seeds e migrações mesmo diante de flags de confirmação.
+3. **Correspondência de Conexões Supabase (`extractSupabaseDbProjectRef`):** Extração e validação do identificador de projeto Supabase a partir de URLs diretas (`db.<ref>.supabase.co`) e de connection pooler (`medicina_<role>.<ref>@*.pooler.supabase.com`). Rejeição imediata caso qualquer URL de banco ou storage aponte para projeto divergente do `STAGING_SUPABASE_PROJECT_REF` autorizado ou coincida com produção.
+4. **Verificação de PDFs Didáticos com Parser Real:** Compatibilização de `extrairTextoPDF` em `src/lib/ingestion.ts` com a classe `PDFParse` do `pdf-parse` v2 (via buffer `Uint8Array`). Comprovação de leitura nativa (100% de confiança, zero OCR espúrio) dos PDFs sintéticos válidos PDF-1.4, com cálculo de SHA-256 e tamanho exato idênticos aos metadados de banco.
+5. **Worker sob Demanda com Lease e Retomada sem Duplicações:** Testes comprovando interrupção segura por tempo limite (`maxDurationMs`), recuperação de jobs com lease vencido para `aguardando` com backoff exponencial, encerramento de jobs com tentativas esgotadas (`LEASE_EXPIRED_MAX_RETRIES`), e retomada a partir da etapa corrente (`segmentacao`) sem duplicar páginas nem chunks.
+6. **Controle Fail-Closed de Migrações e Seed:** Criação do script `scripts/db/migrate-staging.mjs` com manifesto canônico das 9 migrações DDL/propostas (`0000..0003` + `F1.04..F1.12`), modo `--dry-run` para pré-validação de hashes SHA-256 e exigência obrigatória de `CONFIRM_STAGING_MIGRATIONS=true`.
+7. **Bateria Completa de Validação:** 19/19 testes aprovados na suíte dedicada `h1_03_staging_preflight.test.ts`, 37/37 arquivos de teste aprovados no Vitest integral (348 testes, 100% de sucesso), Next.js 16.4.2 build limpo (Turbopack), TypeScript 0 erros, ESLint 0 erros/avisos, Drizzle check íntegro, `git diff --check` 0 erros e suíte RLS 41/41 cenários aprovados.
+
+**Próximo marco operacional recomendado (quando autorizado):** Provisionamento manual dos serviços de Staging (Supabase e Vercel) conforme o Checklist Operacional.

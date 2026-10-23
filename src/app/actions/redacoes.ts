@@ -4,6 +4,7 @@ import { db } from '../../db';
 import { redacoes, generos, repertorios } from '../../db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { requireRole } from '../../lib/authorization';
+import { applyRlsContext } from '../../db/rls-context';
 import {
   PublicOperationError,
   logOperationalFailure,
@@ -102,38 +103,42 @@ export async function registrarRedacao(
   const validado = validacao.data;
 
   try {
-    if (validado.generoId) {
-      const [generoExistente] = await db
-        .select({ id: generos.id })
-        .from(generos)
-        .where(eq(generos.id, validado.generoId))
-        .limit(1);
+    return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
 
-      if (!generoExistente) {
-        return operationFailure('NOT_FOUND', 'Gênero textual não encontrado.');
+      if (validado.generoId) {
+        const [generoExistente] = await tx
+          .select({ id: generos.id })
+          .from(generos)
+          .where(eq(generos.id, validado.generoId))
+          .limit(1);
+
+        if (!generoExistente) {
+          return operationFailure('NOT_FOUND', 'Gênero textual não encontrado.');
+        }
       }
-    }
 
-    const [nova] = await db
-      .insert(redacoes)
-      .values({
-        perfilId: perfil.id,
-        formato: validado.formato,
-        generoId: validado.generoId || null,
-        tema: validado.tema,
-        texto: validado.texto,
-        minutosGastos: validado.minutosGastos,
-        escritaEm: new Date(),
-        notaTotal: null,
-      })
-      .returning();
+      const [nova] = await tx
+        .insert(redacoes)
+        .values({
+          perfilId: perfil.id,
+          formato: validado.formato,
+          generoId: validado.generoId || null,
+          tema: validado.tema,
+          texto: validado.texto,
+          minutosGastos: validado.minutosGastos,
+          escritaEm: new Date(),
+          notaTotal: null,
+        })
+        .returning();
 
-    if (!nova) {
-      logOperationalFailure('redacoes.insert_without_returning', 'persistence');
-      return operationFailure('PERSISTENCE_ERROR', 'Não foi possível confirmar o registro da redação.');
-    }
+      if (!nova) {
+        logOperationalFailure('redacoes.insert_without_returning', 'persistence');
+        return operationFailure('PERSISTENCE_ERROR', 'Não foi possível confirmar o registro da redação.');
+      }
 
-    return operationSuccess({ redacaoId: nova.id });
+      return operationSuccess({ redacaoId: nova.id });
+    });
   } catch {
     logOperationalFailure('redacoes.insert', 'persistence');
     return operationFailure('PERSISTENCE_ERROR', 'Não foi possível salvar a redação. Tente novamente.');
@@ -153,23 +158,27 @@ export async function registrarRepertorio(
   const validado = validacao.data;
 
   try {
-    const [novo] = await db
-      .insert(repertorios)
-      .values({
-        perfilId: perfil.id,
-        referencia: validado.referencia,
-        resumo2Linhas: validado.resumo2Linhas,
-        temasAplicaveis: validado.temasAplicaveis,
-        categoria: validado.categoria,
-      })
-      .returning({ id: repertorios.id });
+    return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
 
-    if (!novo) {
-      logOperationalFailure('redacoes.repertorio.insert_without_returning', 'persistence');
-      return operationFailure('PERSISTENCE_ERROR', 'Não foi possível confirmar o repertório.');
-    }
+      const [novo] = await tx
+        .insert(repertorios)
+        .values({
+          perfilId: perfil.id,
+          referencia: validado.referencia,
+          resumo2Linhas: validado.resumo2Linhas,
+          temasAplicaveis: validado.temasAplicaveis,
+          categoria: validado.categoria,
+        })
+        .returning({ id: repertorios.id });
 
-    return operationSuccess({ repertorioId: novo.id });
+      if (!novo) {
+        logOperationalFailure('redacoes.repertorio.insert_without_returning', 'persistence');
+        return operationFailure('PERSISTENCE_ERROR', 'Não foi possível confirmar o repertório.');
+      }
+
+      return operationSuccess({ repertorioId: novo.id });
+    });
   } catch {
     logOperationalFailure('redacoes.repertorio.insert', 'persistence');
     return operationFailure('PERSISTENCE_ERROR', 'Não foi possível salvar o repertório. Tente novamente.');

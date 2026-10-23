@@ -46,14 +46,40 @@ export interface OpcoesExtracaoPDF {
 
 function resolverPdfParserPadrao(): (buffer: Buffer) => Promise<{ text: string; numpages?: number }> {
   type PdfParser = (buffer: Buffer) => Promise<{ text: string; numpages?: number }>;
-  let pdfParse: unknown = pdfParseModule;
-  for (let depth = 0; depth < 2 && typeof pdfParse !== 'function'; depth++) {
-    pdfParse = (pdfParse as { default?: unknown })?.default;
+
+  // 1. Suporte a pdf-parse v1 ou mock funcional com export default
+  try {
+    let pdfParse: unknown = pdfParseModule;
+    for (let depth = 0; depth < 2 && typeof pdfParse !== 'function'; depth++) {
+      pdfParse = (pdfParse as { default?: unknown })?.default;
+    }
+    if (typeof pdfParse === 'function') {
+      return pdfParse as PdfParser;
+    }
+  } catch {
+    // segue para avaliar classe de parser
   }
-  if (typeof pdfParse !== 'function') {
-    throw new Error('PDF parser indisponível.');
+
+  // 2. Suporte a pdf-parse v2 (PDFParse class com Uint8Array)
+  try {
+    const mod = pdfParseModule as Record<string, unknown>;
+    const candidateClass = mod['PDFParse'];
+    if (typeof candidateClass === 'function') {
+      return async (buffer: Buffer) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const parser = new (candidateClass as any)(new Uint8Array(buffer));
+        const result = await parser.getText();
+        return {
+          text: result.text ?? '',
+          numpages: typeof result.total === 'number' ? result.total : (result.pages?.length ?? 1),
+        };
+      };
+    }
+  } catch {
+    // vitest mock proxy ou classe indisponível
   }
-  return pdfParse as PdfParser;
+
+  throw new Error('PDF parser indisponível.');
 }
 
 /**

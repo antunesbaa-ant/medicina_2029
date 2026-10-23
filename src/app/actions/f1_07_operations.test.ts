@@ -25,7 +25,12 @@ vi.mock('../../db', () => {
   };
   mocks.insert.mockReturnValue(query);
   mocks.update.mockReturnValue(query);
-  return { db: { insert: mocks.insert, update: mocks.update } };
+  const dbObj = {
+    insert: mocks.insert,
+    update: mocks.update,
+    transaction: vi.fn(async (cb: (tx: unknown) => unknown) => cb(dbObj)),
+  };
+  return { db: dbObj };
 });
 
 describe('F1.07 - falhas operacionais nas fronteiras públicas', () => {

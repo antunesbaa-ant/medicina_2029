@@ -14,6 +14,7 @@ import {
   type ChunkSegmentado,
 } from './ingestion';
 import { downloadFromSupabaseStorage } from './supabaseStorage';
+import { assertStagingIsolation, isStagingEnvironment } from './envGuard';
 
 export type StatusJobAcervo = 'aguardando' | 'em_execucao' | 'concluido' | 'falhou';
 export type EtapaJobAcervo = 'extracao' | 'segmentacao' | 'classificacao' | 'indexacao' | 'concluido';
@@ -586,6 +587,9 @@ export async function processarProximoJobAcervo(
   workerId: string,
   deps?: WorkerPipelineDependencies & { arquivoId?: string }
 ): Promise<ResultadoProcessamentoWorker> {
+  if (isStagingEnvironment()) {
+    assertStagingIsolation();
+  }
   const nowFn = deps?.now ?? (() => new Date());
   const leaseDurationMs = deps?.leaseDurationMs ?? DEFAULT_LEASE_DURATION_MS;
   const baseBackoffMs = deps?.baseBackoffMs ?? DEFAULT_BASE_BACKOFF_MS;

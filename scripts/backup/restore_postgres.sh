@@ -59,14 +59,20 @@ if [[ -n "${ENC_DUMP}" && -f "${ENC_DUMP}" ]]; then
   
   if [[ "${ENC_DUMP}" == *.enc ]]; then
     if [[ -z "${BACKUP_ENCRYPTION_KEY}" ]]; then
-      echo "ERRO CRÍTICO: BACKUP_ENCRYPTION_KEY não informada para decifrar arquivo OpenSSL." >&2
+      echo "ERRO CRÍTICO: BACKUP_ENCRYPTION_KEY não informada para decifrar arquivo cifrado." >&2
       exit 1
     fi
-    echo "[$(date -u)] Decifrando dump com OpenSSL (AES-256-CBC)..."
-    openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
-      -in "${ENC_DUMP}" \
-      -out "${DUMP_TO_RESTORE}" \
-      -pass "env:BACKUP_ENCRYPTION_KEY"
+    CRYPTO_SCRIPT="$(dirname "$0")/crypto_envelope.mjs"
+    if [[ -f "${CRYPTO_SCRIPT}" ]] && command -v node &>/dev/null; then
+      echo "[$(date -u)] Decifrando dump com utilitário criptográfico (AES-256-GCM AEAD / fallback retroativo CBC)..."
+      node "${CRYPTO_SCRIPT}" decrypt "${ENC_DUMP}" "${DUMP_TO_RESTORE}"
+    else
+      echo "[$(date -u)] Decifrando dump com OpenSSL (AES-256-CBC legado)..."
+      openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+        -in "${ENC_DUMP}" \
+        -out "${DUMP_TO_RESTORE}" \
+        -pass "env:BACKUP_ENCRYPTION_KEY"
+    fi
   elif [[ "${ENC_DUMP}" == *.gpg ]]; then
     if [[ -z "${BACKUP_ENCRYPTION_KEY}" ]]; then
       echo "ERRO CRÍTICO: BACKUP_ENCRYPTION_KEY não informada para decifrar arquivo GPG." >&2

@@ -12,7 +12,10 @@
     "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:seed": "npx tsx src/db/seed.ts"
+    "db:migrate:staging": "node scripts/db/migrate-staging.mjs",
+    "db:seed": "npx tsx src/db/seed.ts",
+    "db:seed:staging": "npx tsx src/db/seed-staging.ts",
+    "worker:ondemand": "node scripts/worker/run-on-demand.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1101.0",

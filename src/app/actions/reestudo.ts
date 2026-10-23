@@ -5,6 +5,7 @@ import { cicloBlocos, cicloEstado, ciclos, topicos } from '../../db/schema';
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { requireRole } from '../../lib/authorization';
 import { injetarTopicoInputSchema } from '../../lib/validation';
+import { applyRlsContext } from '../../db/rls-context';
 
 // 1. Injetar Re-estudo de um tópico crítico como o próximo bloco do ciclo
 export async function injetarTopicoNoCiclo(
@@ -21,6 +22,9 @@ export async function injetarTopicoNoCiclo(
 
   try {
     return await db.transaction(async (tx) => {
+      // 0. Aplica contexto RLS derivado exclusivamente da sessão autenticada da estudante
+      await applyRlsContext(tx, estudante.id, estudante.papel);
+
       // A. Busca o tópico para descobrir a disciplinaId
       const [topico] = await tx
         .select({

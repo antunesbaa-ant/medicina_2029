@@ -14,7 +14,7 @@ PGUSER="${PGUSER:-postgres}"
 PGDATABASE="${PGDATABASE:-medicina2029}"
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 BACKUP_ENCRYPTION_KEY="${BACKUP_ENCRYPTION_KEY:-}"
-ENCRYPTION_METHOD="${ENCRYPTION_METHOD:-openssl}" # openssl | gpg | none
+ENCRYPTION_METHOD="${ENCRYPTION_METHOD:-aead}" # aead (AES-256-GCM via crypto_envelope) | openssl | openssl-cbc | gpg | none
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 
 TIMESTAMP=$(date -u +"%Y%m%d_%H%M%SZ")
@@ -43,13 +43,22 @@ for cmd in pg_dump pg_dumpall psql sha256sum; do
   fi
 done
 
-if [[ "${ENCRYPTION_METHOD}" == "openssl" ]]; then
+if [[ "${ENCRYPTION_METHOD}" == "aead" || "${ENCRYPTION_METHOD}" == "openssl" ]]; then
+  if [[ -z "${BACKUP_ENCRYPTION_KEY}" ]]; then
+    echo "ERRO CRÍTICO: BACKUP_ENCRYPTION_KEY deve estar definida para cifragem." >&2
+    exit 1
+  fi
+  if ! command -v node &>/dev/null && ! command -v openssl &>/dev/null; then
+    echo "ERRO CRÍTICO: Nem node nem openssl instalados para realizar a cifragem." >&2
+    exit 1
+  fi
+elif [[ "${ENCRYPTION_METHOD}" == "openssl-cbc" ]]; then
   if ! command -v openssl &>/dev/null; then
     echo "ERRO CRÍTICO: openssl solicitado para cifragem mas não instalado." >&2
     exit 1
   fi
   if [[ -z "${BACKUP_ENCRYPTION_KEY}" ]]; then
-    echo "ERRO CRÍTICO: BACKUP_ENCRYPTION_KEY deve estar definida para ENCRYPTION_METHOD=openssl." >&2
+    echo "ERRO CRÍTICO: BACKUP_ENCRYPTION_KEY deve estar definida para ENCRYPTION_METHOD=openssl-cbc." >&2
     exit 1
   fi
 elif [[ "${ENCRYPTION_METHOD}" == "gpg" ]]; then
@@ -151,10 +160,25 @@ sha256sum "${MANIFEST_FILE}" > "${MANIFEST_FILE}.sha256"
 echo "[$(date -u)] Manifesto gerado em: ${MANIFEST_FILE}"
 
 # ------------------------------------------------------------------------------
-# 7. CIFRAGEM EM REPOUSO (AES-256-GCM / PBKDF2 OU GPG)
+# 7. CIFRAGEM EM REPOUSO (AES-256-GCM AEAD / PBKDF2 OU GPG)
 # ------------------------------------------------------------------------------
-if [[ "${ENCRYPTION_METHOD}" == "openssl" ]]; then
-  echo "[$(date -u)] Cifrando dump e globais com OpenSSL (AES-256-CBC com PBKDF2)..."
+CRYPTO_SCRIPT="$(dirname "$0")/crypto_envelope.mjs"
+
+if [[ "${ENCRYPTION_METHOD}" == "aead" || ("${ENCRYPTION_METHOD}" == "openssl" && -f "${CRYPTO_SCRIPT}" && $(command -v node &>/dev/null; echo $?) -eq 0) ]]; then
+  echo "[$(date -u)] Cifrando dump e globais com Criptografia Autenticada (AES-256-GCM AEAD com Tag 128-bit)..."
+
+  node "${CRYPTO_SCRIPT}" encrypt "${DUMP_FILE}" "${DUMP_FILE}.enc"
+  node "${CRYPTO_SCRIPT}" encrypt "${GLOBALS_FILE}" "${GLOBALS_FILE}.enc"
+
+  sha256sum "${DUMP_FILE}.enc" > "${DUMP_FILE}.enc.sha256"
+  sha256sum "${GLOBALS_FILE}.enc" > "${GLOBALS_FILE}.enc.sha256"
+
+  # Remover os arquivos claros após cifragem confirmada
+  rm -f "${DUMP_FILE}" "${GLOBALS_FILE}"
+  echo "[$(date -u)] Arquivos claros removidos após cifragem AEAD bem-sucedida."
+
+elif [[ "${ENCRYPTION_METHOD}" == "openssl-cbc" || "${ENCRYPTION_METHOD}" == "openssl" ]]; then
+  echo "[$(date -u)] AVISO: Cifrando dump e globais no modo legado OpenSSL (AES-256-CBC com PBKDF2)..."
   
   openssl enc -aes-256-cbc -pbkdf2 -iter 100000 -salt \
     -in "${DUMP_FILE}" \

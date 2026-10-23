@@ -3,6 +3,7 @@
 import { db } from '../../db';
 import { checkins } from '../../db/schema';
 import { requireRole } from '../../lib/authorization';
+import { applyRlsContext } from '../../db/rls-context';
 import {
   logOperationalFailure,
   operationFailure,
@@ -31,18 +32,24 @@ export async function registrarCheckin(
   const validado = validacao.data;
 
   try {
-    const [novoCheckin] = await db
-      .insert(checkins)
-      .values({
-        perfilId: perfil.id,
-        data: new Date(),
-        horasSono: validado.horasSono,
-        exercicioMin: validado.exercicioMin,
-        humor: validado.humor,
-        energia: validado.energia,
-        notaLivre: validado.notaLivre || null,
-      })
-      .returning();
+    const novoCheckin = await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
+
+      const [inserted] = await tx
+        .insert(checkins)
+        .values({
+          perfilId: perfil.id,
+          data: new Date(),
+          horasSono: validado.horasSono,
+          exercicioMin: validado.exercicioMin,
+          humor: validado.humor,
+          energia: validado.energia,
+          notaLivre: validado.notaLivre || null,
+        })
+        .returning();
+
+      return inserted;
+    });
 
     if (!novoCheckin) {
       logOperationalFailure('checkin.insert_without_returning', 'persistence');

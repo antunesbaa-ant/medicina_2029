@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export const E2E_NEXTAUTH_SECRET =
   process.env.NEXTAUTH_SECRET ||
-  'medicina2029_e2e_jwt_secret_token_key_at_least_32_chars_long!';
+  'medicina2029_dev_secret_local_testing_auth';
 
 export default defineConfig({
   testDir: './e2e',

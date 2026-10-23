@@ -1,6 +1,12 @@
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from './schema';
+import { assertStagingIsolation, isStagingEnvironment } from '../lib/envGuard';
+
+// Em staging, valida o isolamento estrito antes de instanciar conexões de banco de dados
+if (isStagingEnvironment()) {
+  assertStagingIsolation();
+}
 
 /**
  * Resolução de URLs de conexão com separação de papéis (F1.04-C / F1.06):
