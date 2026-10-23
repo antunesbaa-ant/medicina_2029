@@ -226,9 +226,13 @@ BEGIN
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_auth') THEN
-    REVOKE ALL ON ALL TABLES IN SCHEMA public FROM medicina_auth;
-    REVOKE ALL ON SCHEMA public FROM medicina_auth;
+    DROP OWNED BY medicina_auth;
     DROP ROLE medicina_auth;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_worker') THEN
+    DROP OWNED BY medicina_worker;
+    DROP ROLE medicina_worker;
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_anon') THEN

@@ -66,7 +66,7 @@ CREATE OR REPLACE FUNCTION medicina.current_perfil_id()
 RETURNS uuid
 LANGUAGE plpgsql
 STABLE
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, pg_temp
 AS $$
 DECLARE
   v_val text;
@@ -87,7 +87,7 @@ CREATE OR REPLACE FUNCTION medicina.current_papel()
 RETURNS text
 LANGUAGE plpgsql
 STABLE
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, pg_temp
 AS $$
 DECLARE
   v_val text;
@@ -108,7 +108,7 @@ CREATE OR REPLACE FUNCTION medicina.is_estudante()
 RETURNS boolean
 LANGUAGE sql
 STABLE
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, pg_temp
 AS $$
   SELECT COALESCE(medicina.current_papel() = 'estudante' AND medicina.current_perfil_id() IS NOT NULL, false);
 $$;
@@ -117,7 +117,7 @@ CREATE OR REPLACE FUNCTION medicina.is_responsavel()
 RETURNS boolean
 LANGUAGE sql
 STABLE
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, pg_temp
 AS $$
   SELECT COALESCE(medicina.current_papel() = 'responsavel' AND medicina.current_perfil_id() IS NOT NULL, false);
 $$;
@@ -128,7 +128,7 @@ RETURNS uuid
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, public, pg_temp
 AS $$
   SELECT estudante_perfil_id
   FROM public.responsavel_estudante
@@ -141,7 +141,7 @@ CREATE OR REPLACE FUNCTION medicina.set_context(p_perfil_id uuid, p_papel text)
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, public, pg_temp
 AS $$
 BEGIN
   IF p_perfil_id IS NULL OR p_papel IS NULL THEN
@@ -170,7 +170,7 @@ CREATE OR REPLACE FUNCTION medicina.clear_context()
 RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, pg_temp
 AS $$
 BEGIN
   PERFORM set_config('medicina.current_perfil_id', '', true);
@@ -190,7 +190,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, public, pg_temp
 AS $$
 BEGIN
   -- Anti-enumeração: Se e-mail não estiver na allowlist restrita, retorna vazio imediatamente
@@ -219,6 +219,11 @@ BEGIN
   -- Papel dedicado exclusivamente ao serviço de autenticação NextAuth
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_auth') THEN
     CREATE ROLE medicina_auth WITH NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE LOGIN;
+  END IF;
+
+  -- Papel dedicado exclusivamente ao processamento em lote e pipeline do acervo
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_worker') THEN
+    CREATE ROLE medicina_worker WITH NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE LOGIN;
   END IF;
 
   -- Papel anônimo (para conexões sem contexto ou públicas)
@@ -991,7 +996,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, public, pg_temp
 AS $$
 DECLARE
   v_estudante_id uuid;
@@ -1119,7 +1124,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, public, pg_temp
 AS $$
 DECLARE
   v_estudante_id uuid;

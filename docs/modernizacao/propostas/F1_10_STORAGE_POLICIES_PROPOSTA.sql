@@ -76,7 +76,7 @@ CREATE OR REPLACE FUNCTION medicina.current_perfil_id()
 RETURNS uuid
 LANGUAGE plpgsql
 STABLE
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, pg_temp
 AS $$
 DECLARE
   v_val text;
@@ -96,7 +96,7 @@ CREATE OR REPLACE FUNCTION medicina.current_papel()
 RETURNS text
 LANGUAGE plpgsql
 STABLE
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, pg_temp
 AS $$
 DECLARE
   v_val text;
@@ -113,7 +113,7 @@ CREATE OR REPLACE FUNCTION medicina.is_estudante()
 RETURNS boolean
 LANGUAGE sql
 STABLE
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, pg_temp
 AS $$
   SELECT COALESCE(medicina.current_papel() = 'estudante' AND medicina.current_perfil_id() IS NOT NULL, false);
 $$;
@@ -122,7 +122,7 @@ CREATE OR REPLACE FUNCTION medicina.is_responsavel()
 RETURNS boolean
 LANGUAGE sql
 STABLE
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, pg_temp
 AS $$
   SELECT COALESCE(medicina.current_papel() = 'responsavel' AND medicina.current_perfil_id() IS NOT NULL, false);
 $$;
@@ -131,7 +131,7 @@ CREATE OR REPLACE FUNCTION medicina.is_valid_acervo_storage_path(p_name text)
 RETURNS boolean
 LANGUAGE sql
 IMMUTABLE
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, medicina, pg_temp
 AS $$
   SELECT
     p_name IS NOT NULL
@@ -180,35 +180,79 @@ BEGIN
 END
 $$;
 
--- 4. CONFIGURAÇÃO ESTRITA DO BUCKET PRIVADO `acervo`
-ALTER TABLE storage.buckets DROP CONSTRAINT IF EXISTS storage_buckets_acervo_private_check;
+-- 4. CONFIGURAÇÃO DEFENSIVA DO BUCKET PRIVADO `acervo`
+-- NOTA OPERACIONAL: Em produção e no Supabase gerenciado, o bucket `acervo` deve
+-- ser provisionado prioritariamente pelo Supabase Dashboard (Storage -> New Bucket: 'acervo',
+-- Public: false, Allowed MIME: application/pdf, Max Size: 20MB) ou pela Storage API oficial.
+-- O bloco abaixo realiza inserção defensiva apenas para ambientes locais / testes descartáveis
+-- e emite aviso explícito caso a role não possua permissão de DML no catálogo gerenciado.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'storage' AND table_name = 'buckets') THEN
+    BEGIN
+      INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+      VALUES ('acervo', 'acervo', false, 20971520, ARRAY['application/pdf']::text[])
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        public = false,
+        file_size_limit = 20971520,
+        allowed_mime_types = ARRAY['application/pdf']::text[],
+        updated_at = now();
+    EXCEPTION
+      WHEN insufficient_privilege THEN
+        RAISE WARNING 'AVISO DE PRIVILÉGIO PENDENTE: A role % não possui privilégio de escrita direta em storage.buckets. O bucket acervo DEVE ser criado e configurado como estritamente privado (public = false) pelo Supabase Dashboard ou Management API.', current_user;
+    END;
+  END IF;
+END $$;
 
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES ('acervo', 'acervo', false, 20971520, ARRAY['application/pdf']::text[])
-ON CONFLICT (id) DO UPDATE SET
-  name = EXCLUDED.name,
-  public = false,
-  file_size_limit = 20971520,
-  allowed_mime_types = ARRAY['application/pdf']::text[],
-  updated_at = now();
+-- Aplica a constraint de integridade no bucket acervo quando a sessão possuir privilégio de ownership
+-- (No ambiente local/PGlite garante a trava física; no Supabase gerenciado o bucket é privado via API e emite aviso claro se não for owner)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'storage' AND table_name = 'buckets') THEN
+    BEGIN
+      ALTER TABLE storage.buckets DROP CONSTRAINT IF EXISTS storage_buckets_acervo_private_check;
+      ALTER TABLE storage.buckets
+        ADD CONSTRAINT storage_buckets_acervo_private_check
+        CHECK (
+          id <> 'acervo'
+          OR (
+            public = false
+            AND file_size_limit = 20971520
+            AND allowed_mime_types = ARRAY['application/pdf']::text[]
+          )
+        );
+    EXCEPTION
+      WHEN insufficient_privilege THEN
+        RAISE WARNING 'AVISO DE PRIVILÉGIO PENDENTE: A role % não possui privilégio de ownership para adicionar constraints em storage.buckets. A restrição de privacidade deve ser assegurada pela configuração do bucket no Supabase Storage.', current_user;
+    END;
+  END IF;
+END $$;
 
-ALTER TABLE storage.buckets
-  ADD CONSTRAINT storage_buckets_acervo_private_check
-  CHECK (
-    id <> 'acervo'
-    OR (
-      public = false
-      AND file_size_limit = 20971520
-      AND allowed_mime_types = ARRAY['application/pdf']::text[]
-    )
-  );
+-- 5. ATIVAÇÃO DE POLICIES FAIL-CLOSED NO STORAGE
+-- (No Supabase gerenciado, RLS em storage.objects já é ativo por padrão;
+--  habilitamos defensivamente sem FORCE RLS, emitindo aviso explícito caso a role não tenha ownership).
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'storage' AND table_name = 'buckets') THEN
+    BEGIN
+      ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
+    EXCEPTION
+      WHEN insufficient_privilege THEN
+        RAISE WARNING 'AVISO DE PRIVILÉGIO PENDENTE: Sem permissão de owner para executar ENABLE RLS em storage.buckets (role: %). A segurança de leitura do bucket deve ser gerenciada pelo Supabase Storage.', current_user;
+    END;
+  END IF;
 
--- 5. ATIVAÇÃO DE RLS E POLICIES FAIL-CLOSED NO STORAGE
-ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
-ALTER TABLE storage.buckets FORCE ROW LEVEL SECURITY;
-
-ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
-ALTER TABLE storage.objects FORCE ROW LEVEL SECURITY;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'storage' AND table_name = 'objects') THEN
+    BEGIN
+      ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+    EXCEPTION
+      WHEN insufficient_privilege THEN
+        RAISE WARNING 'AVISO DE PRIVILÉGIO PENDENTE: Sem permissão de owner para executar ENABLE RLS em storage.objects (role: %). Verifique se RLS está habilitado no Supabase Dashboard.', current_user;
+    END;
+  END IF;
+END
+$$;
 
 DROP POLICY IF EXISTS acervo_buckets_select_authenticated ON storage.buckets;
 DROP POLICY IF EXISTS acervo_objects_responsavel_select ON storage.objects;

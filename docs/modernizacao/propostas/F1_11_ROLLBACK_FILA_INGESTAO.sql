@@ -26,17 +26,17 @@ ALTER TABLE public.acervo_paginas
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_worker') THEN
-    IF to_regnamespace('storage') IS NOT NULL THEN
-      REVOKE ALL ON ALL TABLES IN SCHEMA storage FROM medicina_worker;
-      REVOKE ALL ON SCHEMA storage FROM medicina_worker;
+    -- Só remove a role caso o schema medicina (F1.04) não esteja presente;
+    -- caso F1.04 ainda esteja ativo, a remoção da role é delegada ao F1_04_ROLLBACK_RLS.sql.
+    IF to_regnamespace('medicina') IS NULL THEN
+      IF to_regnamespace('storage') IS NOT NULL THEN
+        REVOKE ALL ON ALL TABLES IN SCHEMA storage FROM medicina_worker;
+        REVOKE ALL ON SCHEMA storage FROM medicina_worker;
+      END IF;
+      REVOKE ALL ON ALL TABLES IN SCHEMA public FROM medicina_worker;
+      REVOKE ALL ON SCHEMA public FROM medicina_worker;
+      DROP ROLE medicina_worker;
     END IF;
-    IF to_regnamespace('medicina') IS NOT NULL THEN
-      REVOKE ALL ON ALL FUNCTIONS IN SCHEMA medicina FROM medicina_worker;
-      REVOKE ALL ON SCHEMA medicina FROM medicina_worker;
-    END IF;
-    REVOKE ALL ON ALL TABLES IN SCHEMA public FROM medicina_worker;
-    REVOKE ALL ON SCHEMA public FROM medicina_worker;
-    DROP ROLE medicina_worker;
   END IF;
 END
 $$;

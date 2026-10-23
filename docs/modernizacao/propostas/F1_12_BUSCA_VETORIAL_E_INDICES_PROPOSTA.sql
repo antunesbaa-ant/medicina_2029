@@ -11,6 +11,10 @@
 
 BEGIN;
 
+-- Garante existência defensiva do schema extensions e inclusão no search_path da transação DDL
+CREATE SCHEMA IF NOT EXISTS extensions;
+SET LOCAL search_path = pg_catalog, extensions, public, medicina, pg_temp;
+
 -- ----------------------------------------------------------------------------
 -- 1. PREFLIGHT: VERIFICAÇÃO DE EXTENSÃO PGVECTOR E DIMENSÃO VECTOR(1536)
 -- ----------------------------------------------------------------------------
@@ -33,7 +37,8 @@ BEGIN
      AND a.attname = 'embedding'
      AND NOT a.attisdropped;
 
-  IF v_formatted_type IS DISTINCT FROM 'vector(1536)' THEN
+  IF v_formatted_type IS DISTINCT FROM 'vector(1536)'
+     AND v_formatted_type IS DISTINCT FROM 'extensions.vector(1536)' THEN
     RAISE EXCEPTION 'PREFLIGHT F1.12 FALHOU: coluna public.acervo_chunks.embedding esperada como vector(1536), encontrada: %',
       COALESCE(v_formatted_type, 'AUSENTE')
       USING ERRCODE = 'P0001';
@@ -141,7 +146,7 @@ RETURNS TABLE (
 LANGUAGE plpgsql
 STABLE
 SECURITY DEFINER
-SET search_path = public, medicina, pg_temp
+SET search_path = pg_catalog, extensions, medicina, public, pg_temp
 AS $$
 DECLARE
   v_ctx_perfil_id uuid := NULL;
