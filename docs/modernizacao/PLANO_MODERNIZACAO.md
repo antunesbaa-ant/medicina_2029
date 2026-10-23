@@ -440,4 +440,16 @@ Concluída em 22/10/2026 com decisão formal: **APTO PARA PROVISIONAMENTO MANUAL
 6. **Controle Fail-Closed de Migrações e Seed:** Criação do script `scripts/db/migrate-staging.mjs` com manifesto canônico das 9 migrações DDL/propostas (`0000..0003` + `F1.04..F1.12`), modo `--dry-run` para pré-validação de hashes SHA-256 e exigência obrigatória de `CONFIRM_STAGING_MIGRATIONS=true`.
 7. **Bateria Completa de Validação:** 19/19 testes aprovados na suíte dedicada `h1_03_staging_preflight.test.ts`, 37/37 arquivos de teste aprovados no Vitest integral (348 testes, 100% de sucesso), Next.js 16.4.2 build limpo (Turbopack), TypeScript 0 erros, ESLint 0 erros/avisos, Drizzle check íntegro, `git diff --check` 0 erros e suíte RLS 41/41 cenários aprovados.
 
-**Próximo marco operacional recomendado (quando autorizado):** Provisionamento manual dos serviços de Staging (Supabase e Vercel) conforme o Checklist Operacional.
+### H1.03-R — Correção Pré-Staging e Segregação Rigorosa de Papéis
+Concluída em 23/10/2026 com decisão formal: **CORREÇÃO HOMOLOGADA E PREFLIGHT REVALIDADO**:
+1. **Segregação de Papéis de Menor Privilégio no Runtime:** Eliminação completa do uso da role administrativa `postgres` no runtime de staging (Vercel/Next.js/Worker). As conexões de runtime passam a utilizar estritamente papéis restritos:
+   - `medicina_app`: Aplicação web cotidiana e Server Actions de negócio (sem acesso a `password_hash` nem tabelas do auth);
+   - `medicina_auth`: NextAuth e verificação de sessões, com privilégio restrito à execução de `medicina.autenticar_por_email`;
+   - `medicina_worker`: Processamento assíncrono da fila de ingestão e OCR do acervo.
+   - Role administrativa `postgres`: Uso restrito e exclusivo do runner de migrações DDL (`scripts/db/migrate-staging.mjs`), nunca configurada nas variáveis de runtime da aplicação.
+2. **Defesa em Profundidade no `envGuard`:** Implementação do parser `extractDatabaseRole` com suporte tanto a URLs diretas quanto ao Supabase Connection Pooler (`<role>.<project_ref>@pooler.supabase.com`). Bloqueio imediato fail-closed com erro `VIOLAÇÃO DE MENOR PRIVILÉGIO` se qualquer conexão de runtime utilizar `postgres`, `supabase_admin`, `root` ou `admin`, e bloqueio com `INCOMPATIBILIDADE DE PAPEL` em caso de inversão cruzada de papéis.
+3. **Bloqueio no Runner de Migrações:** `scripts/db/migrate-staging.mjs` passa a priorizar `DATABASE_MIGRATION_URL` / `DATABASE_ADMIN_URL` e a rejeitar sumariamente execução se alimentado com roles restritas de runtime (`medicina_app`, `medicina_auth`, `medicina_worker`).
+4. **Provisionamento de Senhas no Supabase:** Formalização do requisito operacional pós-DDL: as roles criadas pelas migrações devem receber senha explícita via `ALTER ROLE <role> WITH PASSWORD '<senha>'` antes da ativação do runtime.
+5. **Bateria de Testes Negativos e Revalidação Integral:** 24/24 testes aprovados na suíte dedicada `h1_03_staging_preflight.test.ts` (incluindo testes negativos para credenciais administrativas em runtime e inversão de roles), 37/37 arquivos e 353 testes aprovados no Vitest integral (100% de sucesso), Next.js 16.4.2 build limpo (Turbopack), TypeScript 0 erros, ESLint 0 erros/avisos, Drizzle check íntegro, `git diff --check` 0 erros e suíte RLS 41/41 cenários aprovados.
+
+**Próximo marco operacional recomendado (quando autorizado):** Provisionamento manual dos serviços de Staging (Supabase e Vercel) conforme o Checklist Operacional H1.03-R corrigido.

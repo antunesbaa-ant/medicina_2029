@@ -129,6 +129,23 @@ export function extractSupabaseDbProjectRef(urlStr: string): string | null {
 }
 
 /**
+ * Extrai o nome do papel (role) de banco a partir de uma URL de conexão PostgreSQL (H1.03-R).
+ * Reconhece tanto o formato direto ("medicina_app") quanto o formato de pooler Supabase ("medicina_app.projectref").
+ */
+export function extractDatabaseRole(urlStr: string): string | null {
+  if (!urlStr || typeof urlStr !== 'string') return null;
+  try {
+    const parsed = new URL(urlStr);
+    const rawUser = decodeURIComponent(parsed.username).trim().toLowerCase();
+    if (!rawUser) return null;
+    const dotIndex = rawUser.indexOf('.');
+    return dotIndex > 0 ? rawUser.slice(0, dotIndex) : rawUser;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Tipo flexível para leitura de variáveis de ambiente.
  */
 export type EnvDictionary = NodeJS.ProcessEnv | Record<string, string | undefined>;
@@ -198,7 +215,7 @@ export function validateStagingIsolation(env: EnvDictionary = process.env): Stag
   }
 
   // 3. Validação de URLs de Banco de Dados
-  const checkDbUrl = (url: string | undefined, name: string) => {
+  const checkDbUrl = (url: string | undefined, name: string, expectedRole: string) => {
     if (!url) {
       errors.push(`${name} não configurada para o ambiente de staging.`);
       return;
@@ -241,14 +258,39 @@ export function validateStagingIsolation(env: EnvDictionary = process.env): Stag
           }
         }
       }
+
+      // Validação de Menor Privilégio e Segregação de Papéis no Runtime de Staging (H1.03-R)
+      const role = extractDatabaseRole(url);
+      const isLocalHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+      const isLocalProject = rawProjectRef?.toLowerCase() === 'local-supabase';
+      const strictRoles = env.STRICT_RUNTIME_ROLES === 'true' || (!isLocalHost && !isLocalProject);
+
+      if (strictRoles && role) {
+        // Bloqueio categórico de credenciais administrativas no runtime
+        if (role === 'postgres' || role === 'supabase_admin' || role === 'root' || role === 'admin') {
+          errors.push(
+            `VIOLAÇÃO DE MENOR PRIVILÉGIO: ${name} utiliza credenciais administrativas ("${role}"). ` +
+            `O runtime de staging deve utilizar exclusivamente o papel restrito "${expectedRole}".`
+          );
+        } else if (role !== expectedRole) {
+          errors.push(
+            `INCOMPATIBILIDADE DE PAPEL: ${name} utiliza a role "${role}", mas esperava-se "${expectedRole}".`
+          );
+        }
+      }
     } catch {
       errors.push(`${name} possui formato de URL inválido.`);
     }
   };
 
-  checkDbUrl(dbAppUrl, 'DATABASE_APP_URL');
-  checkDbUrl(dbAuthUrl, 'DATABASE_AUTH_URL');
-  checkDbUrl(dbWorkerUrl, 'DATABASE_WORKER_URL');
+  // Se DATABASE_URL for fornecida separadamente para o runtime, valida com medicina_app
+  if (dbUrl && dbUrl !== dbAppUrl) {
+    checkDbUrl(dbUrl, 'DATABASE_URL', 'medicina_app');
+  }
+
+  checkDbUrl(dbAppUrl, 'DATABASE_APP_URL', 'medicina_app');
+  checkDbUrl(dbAuthUrl, 'DATABASE_AUTH_URL', 'medicina_auth');
+  checkDbUrl(dbWorkerUrl, 'DATABASE_WORKER_URL', 'medicina_worker');
 
   // Coerência estrutural das conexões: em staging, todas devem apontar para a mesma base/cluster
   if (dbNames.size > 1) {

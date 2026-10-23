@@ -55,12 +55,28 @@ export function getMigrationManifest(root = projectRoot) {
 }
 
 /**
+ * @param {string} [urlStr]
+ */
+export function extractDatabaseRole(urlStr) {
+  if (!urlStr || typeof urlStr !== 'string') return null;
+  try {
+    const parsed = new URL(urlStr);
+    const rawUser = decodeURIComponent(parsed.username).trim().toLowerCase();
+    if (!rawUser) return null;
+    const dotIndex = rawUser.indexOf('.');
+    return dotIndex > 0 ? rawUser.slice(0, dotIndex) : rawUser;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {Record<string, string | undefined>} [env]
  */
 export function assertCanRunStagingMigrationsCli(env = process.env) {
   const nodeEnv = env.NODE_ENV?.trim().toLowerCase();
   const appEnv = env.APP_ENV?.trim().toLowerCase();
-  const dbUrl = env.DATABASE_URL || env.DATABASE_APP_URL || '';
+  const dbUrl = env.DATABASE_MIGRATION_URL || env.DATABASE_ADMIN_URL || env.DATABASE_URL || env.DATABASE_APP_URL || '';
   const prodRef = env.PRODUCTION_SUPABASE_PROJECT_REF?.trim();
 
   // 1. Proibição absoluta em produção
@@ -89,6 +105,15 @@ export function assertCanRunStagingMigrationsCli(env = process.env) {
   }
   if (dbUrl.includes('medicina_prod') || dbUrl.includes('production')) {
     throw new Error('PRODUÇÃO BLOQUEADA: Nome de banco produtivo detectado em DATABASE_URL!');
+  }
+
+  // 4. Bloqueio contra papéis restritos de runtime (H1.03-R)
+  const role = extractDatabaseRole(dbUrl);
+  if (role === 'medicina_app' || role === 'medicina_auth' || role === 'medicina_worker') {
+    throw new Error(
+      `VIOLAÇÃO DE PRIVILÉGIO: O runner de migrações não pode ser executado com papel restrito de runtime ("${role}"). ` +
+      'Migrações DDL exigem a role administrativa (ex: "postgres" via DATABASE_MIGRATION_URL).'
+    );
   }
 }
 
@@ -122,9 +147,9 @@ async function main() {
     console.log('\n🔒 Salvaguardas aprovadas. Conectando ao banco de staging...');
     // Importação dinâmica do postgres para execução controlada
     const { default: postgres } = await import('postgres');
-    const dbUrl = process.env.DATABASE_URL || process.env.DATABASE_APP_URL;
+    const dbUrl = process.env.DATABASE_MIGRATION_URL || process.env.DATABASE_ADMIN_URL || process.env.DATABASE_URL;
     if (!dbUrl) {
-      throw new Error('DATABASE_URL ausente.');
+      throw new Error('DATABASE_MIGRATION_URL (ou DATABASE_ADMIN_URL / DATABASE_URL) ausente.');
     }
 
     const sql = postgres(dbUrl, { max: 1 });

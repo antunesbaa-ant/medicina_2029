@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   assertStagingIsolation,
   assertCanRunStagingMigrations,
+  extractDatabaseRole,
   extractSupabaseDbProjectRef,
   isStagingEnvironment,
   StagingIsolationError,
@@ -86,12 +87,12 @@ describe('MEDICINA 2029 — H1.03: Preflight de Ativação do Staging', () => {
   // 2. Distinção entre Staging Publicado e Produção Real
   // --------------------------------------------------------------------------
   describe('2. Distinção entre Staging Publicado (NODE_ENV=production, APP_ENV=staging) e Produção Real', () => {
-    it('aceita staging publicado quando APP_ENV=staging e NODE_ENV=production com variáveis válidas', () => {
+    it('aceita staging publicado quando APP_ENV=staging e NODE_ENV=production com variáveis válidas e papéis segregados', () => {
       const publishedStagingEnv = {
         NODE_ENV: 'production',
         APP_ENV: 'staging',
         STAGING_SUPABASE_PROJECT_REF: 'med2029-staging-xyz',
-        DATABASE_URL: 'postgresql://postgres:secret123@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require',
+        DATABASE_URL: 'postgresql://medicina_app.med2029-staging-xyz:secret123@aws-0-sa-east-1.pooler.supabase.com:6543/postgres?sslmode=require',
         DATABASE_APP_URL: 'postgresql://medicina_app.med2029-staging-xyz:secret123@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
         DATABASE_AUTH_URL: 'postgresql://medicina_auth.med2029-staging-xyz:secret123@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
         DATABASE_WORKER_URL: 'postgresql://medicina_worker.med2029-staging-xyz:secret123@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
@@ -135,9 +136,9 @@ describe('MEDICINA 2029 — H1.03: Preflight de Ativação do Staging', () => {
   });
 
   // --------------------------------------------------------------------------
-  // 3. Correspondência entre Projeto Supabase e Conexões
+  // 3. Correspondência entre Projeto Supabase e Conexões (com Menor Privilégio H1.03-R)
   // --------------------------------------------------------------------------
-  describe('3. Correspondência entre Projeto Supabase Autorizado e Conexões', () => {
+  describe('3. Correspondência entre Projeto Supabase e Conexões com Menor Privilégio', () => {
     it('extrai corretamente project_ref de URL direta Supabase (db.xyz.supabase.co)', () => {
       const ref = extractSupabaseDbProjectRef(
         'postgresql://postgres:mypass@db.projref123.supabase.co:5432/postgres'
@@ -157,11 +158,82 @@ describe('MEDICINA 2029 — H1.03: Preflight de Ativação do Staging', () => {
       expect(extractSupabaseDbProjectRef('postgresql://postgres:postgres@127.0.0.1:5432/postgres')).toBe('local-supabase');
     });
 
+    it('extrai corretamente a role de URLs diretas e de pooler (extractDatabaseRole)', () => {
+      expect(extractDatabaseRole('postgresql://medicina_app.ref123:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres')).toBe('medicina_app');
+      expect(extractDatabaseRole('postgresql://medicina_auth:pass@db.ref123.supabase.co:5432/postgres')).toBe('medicina_auth');
+      expect(extractDatabaseRole('postgresql://postgres.ref123:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres')).toBe('postgres');
+      expect(extractDatabaseRole('postgresql://medicina_worker@localhost:5432/medicina')).toBe('medicina_worker');
+    });
+
+    it('TESTE NEGATIVO H1.03-R: falha se qualquer conexão de runtime utilizar a role administrativa postgres', () => {
+      const adminRuntimeEnv = {
+        APP_ENV: 'staging',
+        STAGING_SUPABASE_PROJECT_REF: 'staging-ref-123',
+        DATABASE_URL: 'postgresql://postgres.staging-ref-123:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        DATABASE_APP_URL: 'postgresql://postgres.staging-ref-123:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        DATABASE_AUTH_URL: 'postgresql://medicina_auth.staging-ref-123:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        DATABASE_WORKER_URL: 'postgresql://medicina_worker.staging-ref-123:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        SUPABASE_URL: 'https://staging-ref-123.supabase.co',
+        SUPABASE_ANON_KEY: 'dummy-anon-key',
+        NEXTAUTH_SECRET: 'segredo_com_pelo_menos_32_caracteres_longos!',
+        GEMINI_API_KEY: 'fake_gemini_key',
+        CONFIRM_ISOLATED_STAGING_ENVIRONMENT: 'true',
+      };
+
+      const res = validateStagingIsolation(adminRuntimeEnv);
+      expect(res.valid).toBe(false);
+      expect(res.errors.some((e) => e.includes('VIOLAÇÃO DE MENOR PRIVILÉGIO'))).toBe(true);
+      expect(res.errors.some((e) => e.includes('DATABASE_APP_URL utiliza credenciais administrativas'))).toBe(true);
+    });
+
+    it('TESTE NEGATIVO H1.03-R: falha se os papéis restritos de runtime estiverem invertidos ou incorretos', () => {
+      const crossRoleEnv = {
+        APP_ENV: 'staging',
+        STAGING_SUPABASE_PROJECT_REF: 'staging-ref-123',
+        DATABASE_URL: 'postgresql://medicina_auth.staging-ref-123:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        DATABASE_APP_URL: 'postgresql://medicina_auth.staging-ref-123:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres', // Errado! Deveria ser medicina_app
+        DATABASE_AUTH_URL: 'postgresql://medicina_app.staging-ref-123:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres', // Errado! Deveria ser medicina_auth
+        DATABASE_WORKER_URL: 'postgresql://medicina_worker.staging-ref-123:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        SUPABASE_URL: 'https://staging-ref-123.supabase.co',
+        SUPABASE_ANON_KEY: 'dummy-anon-key',
+        NEXTAUTH_SECRET: 'segredo_com_pelo_menos_32_caracteres_longos!',
+        GEMINI_API_KEY: 'fake_gemini_key',
+        CONFIRM_ISOLATED_STAGING_ENVIRONMENT: 'true',
+      };
+
+      const res = validateStagingIsolation(crossRoleEnv);
+      expect(res.valid).toBe(false);
+      expect(res.errors.some((e) => e.includes('INCOMPATIBILIDADE DE PAPEL'))).toBe(true);
+    });
+
+    it('TESTE NEGATIVO H1.03-R: bloqueia o runner de migrações se for fornecido papel restrito de runtime (medicina_app)', () => {
+      expect(() => {
+        assertCanRunStagingMigrationsCli({
+          APP_ENV: 'staging',
+          CONFIRM_STAGING_MIGRATIONS: 'true',
+          DATABASE_URL: 'postgresql://medicina_app.proj:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        });
+      }).toThrow(/VIOLAÇÃO DE PRIVILÉGIO: O runner de migrações não pode ser executado com papel restrito/);
+    });
+
+    it('aprova o runner de migrações com role administrativa (postgres via DATABASE_MIGRATION_URL)', () => {
+      expect(() => {
+        assertCanRunStagingMigrationsCli({
+          APP_ENV: 'staging',
+          CONFIRM_STAGING_MIGRATIONS: 'true',
+          DATABASE_MIGRATION_URL: 'postgresql://postgres.proj:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        });
+      }).not.toThrow();
+    });
+
     it('falha quando DATABASE_URL aponta para projeto Supabase divergente de STAGING_SUPABASE_PROJECT_REF', () => {
       const divergingEnv = {
         APP_ENV: 'staging',
         STAGING_SUPABASE_PROJECT_REF: 'projeto-staging-correto',
-        DATABASE_URL: 'postgresql://postgres:pass@db.outro-projeto-estranho.supabase.co:5432/postgres',
+        DATABASE_URL: 'postgresql://medicina_app:pass@db.outro-projeto-estranho.supabase.co:5432/postgres',
+        DATABASE_APP_URL: 'postgresql://medicina_app:pass@db.outro-projeto-estranho.supabase.co:5432/postgres',
+        DATABASE_AUTH_URL: 'postgresql://medicina_auth:pass@db.outro-projeto-estranho.supabase.co:5432/postgres',
+        DATABASE_WORKER_URL: 'postgresql://medicina_worker:pass@db.outro-projeto-estranho.supabase.co:5432/postgres',
         SUPABASE_URL: 'https://projeto-staging-correto.supabase.co',
         SUPABASE_ANON_KEY: 'dummy-anon-key',
         NEXTAUTH_SECRET: 'segredo_com_pelo_menos_32_caracteres_longos!',
@@ -179,7 +251,10 @@ describe('MEDICINA 2029 — H1.03: Preflight de Ativação do Staging', () => {
         APP_ENV: 'staging',
         STAGING_SUPABASE_PROJECT_REF: 'staging-ref-123',
         PRODUCTION_SUPABASE_PROJECT_REF: 'producao-ref-999',
-        DATABASE_URL: 'postgresql://postgres.producao-ref-999:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        DATABASE_URL: 'postgresql://medicina_app.producao-ref-999:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        DATABASE_APP_URL: 'postgresql://medicina_app.producao-ref-999:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        DATABASE_AUTH_URL: 'postgresql://medicina_auth.producao-ref-999:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
+        DATABASE_WORKER_URL: 'postgresql://medicina_worker.producao-ref-999:pass@aws-0-sa-east-1.pooler.supabase.com:6543/postgres',
         SUPABASE_URL: 'https://staging-ref-123.supabase.co',
         SUPABASE_ANON_KEY: 'dummy-anon-key',
         NEXTAUTH_SECRET: 'segredo_com_pelo_menos_32_caracteres_longos!',
