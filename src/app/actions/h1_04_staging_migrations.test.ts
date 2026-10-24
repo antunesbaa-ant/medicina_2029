@@ -82,7 +82,17 @@ async function createSupabaseSimulatedDb(): Promise<{ db: PGliteInstance; sql: S
           throw err;
         }
       },
-      reserve: async () => sqlAdapter,
+      reserve: async () => {
+        // Conexão reservada fiel ao driver postgres real (sql.reserve()): NÃO possui método .begin()
+        const reservedClient = Object.assign(
+          async (strings: TemplateStringsArray | string, ...values: unknown[]) => sqlAdapter(strings, ...values),
+          {
+            unsafe: sqlAdapter.unsafe,
+            release: () => {},
+          }
+        );
+        return reservedClient as unknown as SqlAdapter;
+      },
       release: () => {},
     }
   );

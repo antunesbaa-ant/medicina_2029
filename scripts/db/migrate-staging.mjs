@@ -27,8 +27,10 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import tls from 'node:tls';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -63,6 +65,33 @@ export function stripOuterTransaction(sqlContent) {
   // Strip trailing COMMIT;
   content = content.replace(/\bCOMMIT\s*;?(\s*(?:--[^\n]*\n|\/\*[\s\S]*?\*\/)\s*)*$/i, '');
   return content.trim();
+}
+
+/**
+ * Executa um bloco de operações sob uma transação atômica única na conexão informada.
+ * Suporta conexões reservadas (sql.reserve()) via BEGIN/COMMIT/ROLLBACK explícito
+ * e clientes que implementam o método .begin() nativo.
+ * @param {any} client
+ * @param {function(any): Promise<any>} fn
+ */
+export async function withTransaction(client, fn) {
+  if (typeof client.begin === 'function') {
+    return await client.begin(fn);
+  }
+
+  await client.unsafe('BEGIN;');
+  try {
+    const result = await fn(client);
+    await client.unsafe('COMMIT;');
+    return result;
+  } catch (err) {
+    try {
+      await client.unsafe('ROLLBACK;');
+    } catch {
+      // Ignora falha secundária de rollback se a conexão foi encerrada
+    }
+    throw err;
+  }
 }
 
 /**
@@ -362,8 +391,8 @@ export async function executeStagingMigrations({
             const rawSqlContent = fs.readFileSync(m.fullPath, 'utf8');
             const cleanSqlContent = stripOuterTransaction(rawSqlContent);
 
-            // Garante transação única e atômica para DDL e inserção de histórico
-            await client.begin(async (tx) => {
+            // Garante transação única e atômica para DDL e inserção de histórico (suporta sql.reserve() sem .begin())
+            await withTransaction(client, async (tx) => {
               await tx.unsafe(cleanSqlContent);
               await tx`
                 INSERT INTO public._medicina_staging_migrations (ordem, rel_path, sha256, executado_por, tamanho_bytes)
@@ -457,7 +486,19 @@ async function main() {
 
     console.log(`\n🔒 Salvaguardas aprovadas. Conectando em sessão ${isCheckDb ? 'somente-leitura' : 'dedicada de migração'}...`);
     const { default: postgres } = await import('postgres');
-    const sql = postgres(dbUrl, { max: 1 });
+
+    // Configuração estrita de TLS com suporte a certificado CA customizado do Supabase
+    let sslOptions = { rejectUnauthorized: true };
+    const caEnvPath = process.env.SUPABASE_SSL_CA || process.env.PGSSLROOTCERT;
+    const defaultCaPath = path.join(os.homedir(), 'Downloads', 'prod-ca-2021.crt');
+    const targetCaPath = caEnvPath ? path.resolve(caEnvPath.replace(/^~(?=$|\/|\\)/, os.homedir())) : defaultCaPath;
+    if (fs.existsSync(targetCaPath)) {
+      const caContent = fs.readFileSync(targetCaPath, 'utf8');
+      sslOptions = { rejectUnauthorized: true, ca: [...tls.rootCertificates, caContent] };
+      console.log(`🔐 Certificado TLS CA carregado de: ${targetCaPath}`);
+    }
+
+    const sql = postgres(dbUrl, { max: 1, ssl: sslOptions });
 
     try {
       console.log('🔄 Verificando histórico e executando runner...');
