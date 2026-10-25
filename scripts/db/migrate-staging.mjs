@@ -130,16 +130,20 @@ export const MIGRATION_PROBES = {
     return Boolean(res?.fn);
   },
   6: async (sql) => {
-    // F1_09_INTEGRIDADE_E_IDEMPOTENCIA_PROPOSTA.sql: constraint acervo_arquivos_storage_path_uniq
+    // F1_09_INTEGRIDADE_E_IDEMPOTENCIA_PROPOSTA.sql: operacoes_idempotentes ou constraints de unicidade
     const rows = await sql`
-      SELECT 1 FROM pg_constraint WHERE conname = 'acervo_arquivos_storage_path_uniq';
+      SELECT 1 FROM pg_constraint WHERE conname IN ('acervo_arquivos_storage_path_uniq', 'operacoes_idempotentes_perfil_escopo_chave_unique', 'acervo_arquivos_hash_conteudo_unique');
     `;
     return rows.length > 0;
   },
   7: async (sql) => {
-    // F1_10_STORAGE_POLICIES_PROPOSTA.sql: funcao medicina.is_valid_acervo_storage_path
-    const [res] = await sql`SELECT to_regprocedure('medicina.is_valid_acervo_storage_path(text)') as fn;`;
-    return Boolean(res?.fn);
+    // F1_10_STORAGE_POLICIES_PROPOSTA.sql: funcao medicina.is_valid_acervo_storage_path ou constraint acervo_arquivos_file_path_format_check
+    const rows = await sql`
+      SELECT
+        to_regprocedure('medicina.is_valid_acervo_storage_path(text)') as fn,
+        (SELECT 1 FROM pg_constraint WHERE conname = 'acervo_arquivos_file_path_format_check') as cst;
+    `;
+    return Boolean(rows[0]?.fn || rows[0]?.cst);
   },
   8: async (sql) => {
     // F1_11_FILA_INGESTAO_PROPOSTA.sql: cria acervo_jobs
