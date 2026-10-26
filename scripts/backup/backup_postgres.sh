@@ -17,6 +17,28 @@ BACKUP_ENCRYPTION_KEY="${BACKUP_ENCRYPTION_KEY:-}"
 ENCRYPTION_METHOD="${ENCRYPTION_METHOD:-aead}" # aead (AES-256-GCM via crypto_envelope) | openssl | openssl-cbc | gpg | none
 RETENTION_DAYS="${RETENTION_DAYS:-7}"
 
+# Validação e exigência estrita de TLS (verify-full) para conexões remotas
+CA_CERT_DEFAULT="${HOME}/Downloads/prod-ca-2021.crt"
+PGSSLROOTCERT="${PGSSLROOTCERT:-}"
+if [[ -z "${PGSSLROOTCERT}" && -f "${CA_CERT_DEFAULT}" ]]; then
+  PGSSLROOTCERT="${CA_CERT_DEFAULT}"
+fi
+
+if [[ "${PGHOST}" != "localhost" && "${PGHOST}" != "127.0.0.1" ]]; then
+  PGSSLMODE="${PGSSLMODE:-verify-full}"
+  if [[ "${PGSSLMODE}" == "verify-full" || "${PGSSLMODE}" == "verify-ca" ]]; then
+    if [[ -z "${PGSSLROOTCERT}" || ! -f "${PGSSLROOTCERT}" ]]; then
+      echo "ERRO CRÍTICO: Conexão remota com PGSSLMODE=${PGSSLMODE} exige PGSSLROOTCERT válido (ex: ~/Downloads/prod-ca-2021.crt)." >&2
+      exit 1
+    fi
+  fi
+else
+  PGSSLMODE="${PGSSLMODE:-prefer}"
+fi
+
+export PGSSLMODE
+export PGSSLROOTCERT
+
 TIMESTAMP=$(date -u +"%Y%m%d_%H%M%SZ")
 BACKUP_PREFIX="medicina2029_backup_${TIMESTAMP}"
 RUN_DIR="${BACKUP_DIR}/${BACKUP_PREFIX}"

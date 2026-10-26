@@ -44,3 +44,12 @@ next-env.d.ts
 # playwright
 /playwright-report/
 /test-results/
+
+# backups and database dumps
+/backups/
+*.dump
+*.dump.enc
+*.dump.gpg
+*.dump.sha256
+*.enc.sha256
+

@@ -31,6 +31,7 @@ export interface SeedStagingOptions {
   studentPassword?: string;
   responsiblePassword?: string;
   dryRun?: boolean;
+  dbInstance?: any;
 }
 
 export interface SeedStagingSummary {
@@ -153,6 +154,7 @@ export function assertCanRunStagingSeed(env: NodeJS.ProcessEnv | Record<string, 
  */
 export async function seedStaging(options: SeedStagingOptions = {}): Promise<SeedStagingSummary> {
   assertCanRunStagingSeed(process.env);
+  const targetDb = options.dbInstance ?? db;
   const startTime = Date.now();
 
   // 1. Resolução segura de senhas (sem hardcoding em ambiente publicado)
@@ -176,14 +178,14 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
   const hashResponsavel = await bcrypt.hash(responsiblePassword, salt);
 
   // 2. Allowlist de Staging (Mandatória antes de inserir em perfis devido à trigger check_allowlist)
-  await db.execute(sql`
+  await targetDb.execute(sql`
     INSERT INTO public.allowlist (email)
     VALUES (${STAGING_ALICE_EMAIL}), (${STAGING_BRUNO_EMAIL})
     ON CONFLICT (email) DO NOTHING;
   `);
 
   // 3. Perfis Sintéticos (Alice e Bruno)
-  await db
+  await targetDb
     .insert(perfis)
     .values([
       {
@@ -214,7 +216,7 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
     });
 
   // 4. Vínculo Responsável-Estudante
-  await db.execute(sql`
+  await targetDb.execute(sql`
     INSERT INTO public.responsavel_estudante (vinculo_id, responsavel_perfil_id, estudante_perfil_id)
     VALUES (1, ${STAGING_BRUNO_PERFIL_ID}::uuid, ${STAGING_ALICE_PERFIL_ID}::uuid)
     ON CONFLICT (vinculo_id) DO UPDATE SET
@@ -232,7 +234,7 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
   ];
 
   for (const d of discConfigs) {
-    await db
+    await targetDb
       .insert(disciplinas)
       .values(d)
       .onConflictDoUpdate({
@@ -256,7 +258,7 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
   ];
 
   for (const t of topicosConfigs) {
-    await db
+    await targetDb
       .insert(topicos)
       .values({
         id: t.id,
@@ -280,7 +282,7 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
   }
 
   // 7. Ciclo de Estudos Sintético (28 Blocos)
-  await db
+  await targetDb
     .insert(ciclos)
     .values({
       id: STAGING_CICLO_ID,
@@ -308,7 +310,7 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
     const tipo = tiposBloco[(i - 1) % tiposBloco.length];
     const estiloAlvo = estilos[(i - 1) % estilos.length];
 
-    await db
+    await targetDb
       .insert(cicloBlocos)
       .values({
         id: `41000000-0000-4000-8000-${i.toString().padStart(12, '0')}`,
@@ -331,7 +333,7 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
   }
 
   // Estado do ciclo
-  await db
+  await targetDb
     .insert(cicloEstado)
     .values({
       cicloId: STAGING_CICLO_ID,
@@ -437,7 +439,7 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
   ];
 
   for (const c of cardsConfigs) {
-    await db
+    await targetDb
       .insert(cards)
       .values({
         id: c.id,
@@ -504,7 +506,7 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
     const sha256 = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
     const filePath = `acervo/${sha256}_${doc.slug}.pdf`;
 
-    await db
+    await targetDb
       .insert(acervoArquivos)
       .values({
         id: doc.id,
@@ -534,7 +536,7 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
 
     // Página sintética
     const paginaId = `f1000000-0000-4000-8000-${doc.id.slice(24)}`;
-    await db
+    await targetDb
       .insert(acervoPaginas)
       .values({
         id: paginaId,
@@ -556,7 +558,7 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
     mockVector[0] = 0.6;
     mockVector[1] = 0.8;
 
-    await db
+    await targetDb
       .insert(acervoChunks)
       .values({
         id: chunkId,
@@ -579,7 +581,7 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
 
     // Job de fila sintético associado
     const jobId = `f3000000-0000-4000-8000-${doc.id.slice(24)}`;
-    await db
+    await targetDb
       .insert(acervoJobs)
       .values({
         id: jobId,
@@ -613,4 +615,16 @@ export async function seedStaging(options: SeedStagingOptions = {}): Promise<See
     jobsCriados: totalJobs,
     tempoMs,
   };
+}
+
+if (process.argv[1]?.includes('seed-staging')) {
+  seedStaging()
+    .then((summary) => {
+      console.log('✅ Seed staging concluído com sucesso:', summary);
+      process.exit(0);
+    })
+    .catch((err) => {
+      console.error('❌ Falha ao executar seed staging:', err);
+      process.exit(1);
+    });
 }
