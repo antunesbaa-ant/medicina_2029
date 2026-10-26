@@ -165,24 +165,23 @@ BEGIN
     v_ctx_papel := medicina.current_papel();
   END IF;
 
-  IF current_user = 'medicina_app' OR v_ctx_perfil_id IS NOT NULL OR v_ctx_papel IS NOT NULL THEN
-    IF v_ctx_perfil_id IS NULL OR v_ctx_papel IS NULL THEN
-      RETURN;
-    END IF;
-    IF p_perfil_id IS NOT NULL AND p_perfil_id <> v_ctx_perfil_id THEN
-      RAISE EXCEPTION 'Conflito de identidade RLS na busca do acervo.' USING ERRCODE = '42501';
-    END IF;
-    IF p_papel IS NOT NULL AND p_papel <> v_ctx_papel THEN
-      RAISE EXCEPTION 'Conflito de papel RLS na busca do acervo.' USING ERRCODE = '42501';
-    END IF;
-    v_effective_perfil_id := v_ctx_perfil_id;
-    v_effective_papel := v_ctx_papel;
-  ELSE
-    v_effective_perfil_id := p_perfil_id;
-    v_effective_papel := p_papel;
+  -- FAIL-CLOSED: Se o contexto de sessão não estiver autenticado, encerra sem retornar registros
+  IF v_ctx_perfil_id IS NULL OR v_ctx_papel IS NULL THEN
+    RETURN;
   END IF;
 
-  IF v_effective_perfil_id IS NULL OR v_effective_papel NOT IN ('responsavel', 'estudante') THEN
+  -- Validação contra spoofing de identidade fornecida em parâmetros
+  IF p_perfil_id IS NOT NULL AND p_perfil_id <> v_ctx_perfil_id THEN
+    RAISE EXCEPTION 'Conflito de identidade RLS na busca do acervo.' USING ERRCODE = '42501';
+  END IF;
+  IF p_papel IS NOT NULL AND p_papel <> v_ctx_papel THEN
+    RAISE EXCEPTION 'Conflito de papel RLS na busca do acervo.' USING ERRCODE = '42501';
+  END IF;
+
+  v_effective_perfil_id := v_ctx_perfil_id;
+  v_effective_papel := v_ctx_papel;
+
+  IF v_effective_papel NOT IN ('responsavel', 'estudante') THEN
     RETURN;
   END IF;
 
@@ -238,36 +237,39 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON ALL FUNCTIONS IN SCHEMA medicina FROM PUBLIC;
+-- ----------------------------------------------------------------------------
+-- 5. PERMISSÕES CIRÚRGICAS (LEAST PRIVILEGE)
+-- Revoga privilégios estritamente da nova função para PUBLIC e medicina_anon,
+-- evitando impacto adverso nas funções pré-existentes do schema medicina.
+-- ----------------------------------------------------------------------------
+REVOKE ALL ON FUNCTION medicina.fn_busca_hibrida_acervo(
+  text,
+  vector,
+  uuid,
+  integer,
+  double precision,
+  text,
+  uuid
+) FROM PUBLIC;
 
 DO $$
 BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_anon') THEN
+    REVOKE ALL ON FUNCTION medicina.fn_busca_hibrida_acervo(
+      text,
+      vector,
+      uuid,
+      integer,
+      double precision,
+      text,
+      uuid
+    ) FROM medicina_anon;
+  END IF;
+
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_app') THEN
+    GRANT USAGE ON SCHEMA extensions TO medicina_app;
     GRANT USAGE ON SCHEMA medicina TO medicina_app;
-    IF to_regprocedure('medicina.current_perfil_id()') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.current_perfil_id() TO medicina_app;
-    END IF;
-    IF to_regprocedure('medicina.current_papel()') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.current_papel() TO medicina_app;
-    END IF;
-    IF to_regprocedure('medicina.is_estudante()') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.is_estudante() TO medicina_app;
-    END IF;
-    IF to_regprocedure('medicina.is_responsavel()') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.is_responsavel() TO medicina_app;
-    END IF;
-    IF to_regprocedure('medicina.current_managed_estudante_id()') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.current_managed_estudante_id() TO medicina_app;
-    END IF;
-    IF to_regprocedure('medicina.set_context(uuid, text)') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.set_context(uuid, text) TO medicina_app;
-    END IF;
-    IF to_regprocedure('medicina.clear_context()') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.clear_context() TO medicina_app;
-    END IF;
-    IF to_regprocedure('medicina.is_valid_acervo_storage_path(text)') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.is_valid_acervo_storage_path(text) TO medicina_app;
-    END IF;
+
     GRANT EXECUTE ON FUNCTION medicina.fn_busca_hibrida_acervo(
       text,
       vector,
@@ -277,33 +279,6 @@ BEGIN
       text,
       uuid
     ) TO medicina_app;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_auth') THEN
-    GRANT USAGE ON SCHEMA medicina TO medicina_auth;
-    IF to_regprocedure('medicina.autenticar_por_email(text)') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.autenticar_por_email(text) TO medicina_auth;
-    END IF;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_worker') THEN
-    GRANT USAGE ON SCHEMA medicina TO medicina_worker;
-    IF to_regprocedure('medicina.current_perfil_id()') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.current_perfil_id() TO medicina_worker;
-    END IF;
-    IF to_regprocedure('medicina.current_papel()') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.current_papel() TO medicina_worker;
-    END IF;
-    IF to_regprocedure('medicina.is_estudante()') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.is_estudante() TO medicina_worker;
-    END IF;
-    IF to_regprocedure('medicina.is_responsavel()') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.is_responsavel() TO medicina_worker;
-    END IF;
-    IF to_regprocedure('medicina.is_valid_acervo_storage_path(text)') IS NOT NULL THEN
-      GRANT EXECUTE ON FUNCTION medicina.is_valid_acervo_storage_path(text) TO medicina_worker;
-    END IF;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_anon') THEN
-    REVOKE ALL ON ALL FUNCTIONS IN SCHEMA medicina FROM medicina_anon;
   END IF;
 END
 $$;

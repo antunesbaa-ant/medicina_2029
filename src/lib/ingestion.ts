@@ -437,34 +437,74 @@ export async function buscaHibridaAcervo(
 
   let linhas: LinhaBuscaRaw[];
   try {
-    linhas = await db
-      .select({
-        chunkId: sql<string>`r.chunk_id`,
-        arquivoId: sql<string>`r.arquivo_id`,
-        arquivoTitulo: sql<string>`r.arquivo_titulo`,
-        autorFonte: sql<string | null>`r.autor_fonte`,
-        tipoMaterial: sql<string>`r.tipo_material`,
-        disciplinaId: sql<string>`r.disciplina_id`,
-        topicoId: sql<string | null>`r.topico_id`,
-        paginaInicial: sql<number>`r.pagina_inicial`,
-        paginaFinal: sql<number>`r.pagina_final`,
-        ordem: sql<number>`r.ordem`,
-        texto: sql<string>`r.texto`,
-        scoreVetorial: sql<number>`r.score_vetorial`,
-        scoreTextual: sql<number>`r.score_textual`,
-        similaridade: sql<number>`r.similaridade`,
-      })
-      .from(
-        sql`medicina.fn_busca_hibrida_acervo(
-          ${queryLimpa}::text,
-          ${vectorLiteral}::vector(1536),
-          ${disciplinaId ?? null}::uuid,
-          ${limiteSeguro}::integer,
-          ${minSimilaridade}::double precision,
-          ${opcoes?.papel ?? null}::text,
-          ${opcoes?.perfilId ?? null}::uuid
-        ) AS r`
-      );
+    if (typeof db.transaction === 'function' && opcoes?.perfilId && opcoes?.papel) {
+      linhas = await db.transaction(async (tx) => {
+        try {
+          await tx.execute(
+            sql`SELECT medicina.set_context(${opcoes.perfilId}::uuid, ${opcoes.papel}::text);`
+          );
+        } catch {
+          // Em ambientes sem a função medicina.set_context instalada, segue defensivamente
+        }
+        return await tx
+          .select({
+            chunkId: sql<string>`r.chunk_id`,
+            arquivoId: sql<string>`r.arquivo_id`,
+            arquivoTitulo: sql<string>`r.arquivo_titulo`,
+            autorFonte: sql<string | null>`r.autor_fonte`,
+            tipoMaterial: sql<string>`r.tipo_material`,
+            disciplinaId: sql<string>`r.disciplina_id`,
+            topicoId: sql<string | null>`r.topico_id`,
+            paginaInicial: sql<number>`r.pagina_inicial`,
+            paginaFinal: sql<number>`r.pagina_final`,
+            ordem: sql<number>`r.ordem`,
+            texto: sql<string>`r.texto`,
+            scoreVetorial: sql<number>`r.score_vetorial`,
+            scoreTextual: sql<number>`r.score_textual`,
+            similaridade: sql<number>`r.similaridade`,
+          })
+          .from(
+            sql`medicina.fn_busca_hibrida_acervo(
+              ${queryLimpa}::text,
+              ${vectorLiteral}::vector(1536),
+              ${disciplinaId ?? null}::uuid,
+              ${limiteSeguro}::integer,
+              ${minSimilaridade}::double precision,
+              ${opcoes?.papel ?? null}::text,
+              ${opcoes?.perfilId ?? null}::uuid
+            ) AS r`
+          );
+      });
+    } else {
+      linhas = await db
+        .select({
+          chunkId: sql<string>`r.chunk_id`,
+          arquivoId: sql<string>`r.arquivo_id`,
+          arquivoTitulo: sql<string>`r.arquivo_titulo`,
+          autorFonte: sql<string | null>`r.autor_fonte`,
+          tipoMaterial: sql<string>`r.tipo_material`,
+          disciplinaId: sql<string>`r.disciplina_id`,
+          topicoId: sql<string | null>`r.topico_id`,
+          paginaInicial: sql<number>`r.pagina_inicial`,
+          paginaFinal: sql<number>`r.pagina_final`,
+          ordem: sql<number>`r.ordem`,
+          texto: sql<string>`r.texto`,
+          scoreVetorial: sql<number>`r.score_vetorial`,
+          scoreTextual: sql<number>`r.score_textual`,
+          similaridade: sql<number>`r.similaridade`,
+        })
+        .from(
+          sql`medicina.fn_busca_hibrida_acervo(
+            ${queryLimpa}::text,
+            ${vectorLiteral}::vector(1536),
+            ${disciplinaId ?? null}::uuid,
+            ${limiteSeguro}::integer,
+            ${minSimilaridade}::double precision,
+            ${opcoes?.papel ?? null}::text,
+            ${opcoes?.perfilId ?? null}::uuid
+          ) AS r`
+        );
+    }
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error ?? '');
     const fnMissing =

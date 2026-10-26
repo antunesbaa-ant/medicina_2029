@@ -208,15 +208,18 @@ BEGIN
     IF to_regprocedure('medicina.is_responsavel()') IS NOT NULL THEN
       GRANT EXECUTE ON FUNCTION medicina.is_responsavel() TO medicina_worker;
     END IF;
-  END IF;
-
-  IF to_regclass('storage.objects') IS NOT NULL THEN
-    GRANT USAGE ON SCHEMA storage TO medicina_worker;
-    GRANT SELECT ON storage.buckets, storage.objects TO medicina_worker;
     IF to_regprocedure('medicina.is_valid_acervo_storage_path(text)') IS NOT NULL THEN
       GRANT EXECUTE ON FUNCTION medicina.is_valid_acervo_storage_path(text) TO medicina_worker;
     END IF;
   END IF;
+
+  -- COMPATIBILIDADE NATIVA COM SUPABASE CLOUD (H1.07-R / MODELO A):
+  -- No Supabase Cloud gerenciado, o schema `storage` e as tabelas `storage.buckets` e
+  -- `storage.objects` pertencem ao superusuário interno `supabase_storage_admin`.
+  -- A role de conexão (`postgres`) NÃO é proprietária dessas tabelas e qualquer
+  -- tentativa de GRANT/REVOKE direto sobre elas falha por falta de privilégios.
+  -- Conforme o Modelo A, o worker interage com o Storage exclusivamente via SDK HTTP
+  -- utilizando `SUPABASE_SERVICE_ROLE_KEY`, sem necessitar de privilégios SQL em `storage.*`.
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_app') THEN
     GRANT SELECT, INSERT, UPDATE, DELETE ON public.acervo_jobs TO medicina_app;

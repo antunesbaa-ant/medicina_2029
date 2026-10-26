@@ -5,6 +5,9 @@
 
 BEGIN;
 
+SET LOCAL search_path = pg_catalog, extensions, public, medicina, pg_temp;
+
+DROP FUNCTION IF EXISTS medicina.fn_busca_hibrida_acervo;
 DROP FUNCTION IF EXISTS medicina.fn_busca_hibrida_acervo(
   text,
   vector,

@@ -8,6 +8,8 @@
 
 BEGIN;
 
+DROP POLICY IF EXISTS acervo_jobs_worker_all ON public.acervo_jobs;
+DROP POLICY IF EXISTS acervo_jobs_responsavel_all ON public.acervo_jobs;
 DROP POLICY IF EXISTS disciplinas_worker_select_policy ON public.disciplinas;
 DROP POLICY IF EXISTS topicos_worker_select_policy ON public.topicos;
 DROP POLICY IF EXISTS acervo_chunks_worker_all_policy ON public.acervo_chunks;
@@ -26,13 +28,17 @@ ALTER TABLE public.acervo_paginas
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_worker') THEN
+    -- Revoga os privilégios concedidos pelo F1.11 nas tabelas de domínio
+    REVOKE ALL ON public.acervo_arquivos FROM medicina_worker;
+    REVOKE ALL ON public.acervo_paginas FROM medicina_worker;
+    REVOKE ALL ON public.acervo_chunks FROM medicina_worker;
+    REVOKE ALL ON public.topicos FROM medicina_worker;
+    REVOKE ALL ON public.disciplinas FROM medicina_worker;
+
     -- Só remove a role caso o schema medicina (F1.04) não esteja presente;
     -- caso F1.04 ainda esteja ativo, a remoção da role é delegada ao F1_04_ROLLBACK_RLS.sql.
+    -- (Nota H1.07-R: nenhuma operação de REVOKE é executada no schema nativo storage).
     IF to_regnamespace('medicina') IS NULL THEN
-      IF to_regnamespace('storage') IS NOT NULL THEN
-        REVOKE ALL ON ALL TABLES IN SCHEMA storage FROM medicina_worker;
-        REVOKE ALL ON SCHEMA storage FROM medicina_worker;
-      END IF;
       REVOKE ALL ON ALL TABLES IN SCHEMA public FROM medicina_worker;
       REVOKE ALL ON SCHEMA public FROM medicina_worker;
       DROP ROLE medicina_worker;
