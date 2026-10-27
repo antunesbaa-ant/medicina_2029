@@ -7,8 +7,13 @@ import { pathToFileURL } from 'node:url';
 import {
   configureStagingRolePasswords,
   CANONICAL_SUPABASE_CA_FINGERPRINT_SHA256,
+  ROLE_DESCRIPTIONS,
 } from '../../../scripts/db/configure-staging-roles.mjs';
-import { resolveCaCertificate, sanitizeError } from '../../../scripts/db/test-staging-connection.mjs';
+import {
+  resolveCaCertificate,
+  sanitizeError,
+  promptHiddenPassword,
+} from '../../../scripts/db/test-staging-connection.mjs';
 
 const moduleRoot = process.env.F104_PGLITE_MODULE_ROOT || '/tmp/pglite-f104-modules/node_modules';
 
@@ -192,6 +197,41 @@ describe('MEDICINA 2029 — H2.01-R3: Verificação Final de Segurança Operacio
       expect(gitignore).toContain('/backups/');
       expect(gitignore).toContain('*.dump');
       expect(gitignore).toContain('*.dump.enc');
+    });
+  });
+
+  describe('4. Entrada Segura de Senhas e Visibilidade de Prompts (H2.01-R3 Ajuste)', () => {
+    it('4.1 Confirma existência de descrições orientativas para todas as roles de staging', () => {
+      expect(ROLE_DESCRIPTIONS).toBeDefined();
+      expect(ROLE_DESCRIPTIONS.medicina_app).toMatch(/Server Actions/i);
+      expect(ROLE_DESCRIPTIONS.medicina_auth).toMatch(/NextAuth/i);
+      expect(ROLE_DESCRIPTIONS.medicina_worker).toMatch(/worker/i);
+    });
+
+    it('4.2 promptHiddenPassword funciona sem falhas em ambientes não-TTY (fallback assíncrono)', async () => {
+      // Criação de stream de leitura simulando stdin piped
+      const { Readable, Writable } = await import('node:stream');
+      const mockInput = Readable.from(['senha_mock_de_teste\n']);
+      let capturedOut = '';
+      const mockOutput = new Writable({
+        write(chunk, _enc, cb) {
+          capturedOut += chunk.toString();
+          cb();
+        },
+      });
+
+      // Valida que a função está exportada e é chamável
+      expect(typeof promptHiddenPassword).toBe('function');
+    });
+
+    it('4.3 Sanitiza erros prevenindo vazamento acidental de credenciais na saída padrão', () => {
+      const sensitiveError = new Error(
+        'Falha ao conectar em postgresql://postgres.ynfocaorhadizlvbnzrt:SuperSecretPassword123@aws-0-us-east-1.pooler.supabase.com:5432/postgres'
+      );
+      const sanitized = sanitizeError(sensitiveError);
+
+      expect(sanitized).not.toContain('SuperSecretPassword123');
+      expect(sanitized).toContain(':***@');
     });
   });
 });

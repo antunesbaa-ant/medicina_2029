@@ -93,37 +93,92 @@ export function resolveCaCertificate(specifiedPath) {
 
 /**
  * Solicita a senha interativamente no terminal de forma oculta (sem eco)
+ * Suporta TTY direto com modo raw (sem supressão acidental do prompt) e fallback para pipes/testes
  * @param {string} promptText
  * @returns {Promise<string>}
  */
 export function promptHiddenPassword(promptText = 'Digite a senha do Supabase Staging: ') {
   return new Promise((resolve) => {
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      terminal: true,
-    });
+    if (process.stdin.isTTY && typeof process.stdin.setRawMode === 'function') {
+      // 1. Exibe a pergunta de orientação diretamente na saída padrão e força a descarga
+      process.stdout.write(promptText);
 
-    const stdoutWrite = process.stdout.write.bind(process.stdout);
-    let isPrompting = true;
+      const wasRaw = Boolean(process.stdin.isRaw);
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+      process.stdin.setEncoding('utf8');
 
-    stdoutWrite(promptText);
+      let password = '';
 
-    // Substitui temporariamente _writeToOutput do readline para suprimir o eco dos caracteres digitados
-    // @ts-expect-error readline internal property
-    rl._writeToOutput = function (stringToWrite) {
-      if (!isPrompting) {
-        stdoutWrite(stringToWrite);
-      } else if (stringToWrite.includes('\r') || stringToWrite.includes('\n')) {
-        stdoutWrite('\n');
-      }
-    };
+      const cleanup = () => {
+        process.stdin.removeListener('data', onData);
+        try {
+          process.stdin.setRawMode(wasRaw);
+        } catch {
+          // ignora eventuais exceções ao restaurar o modo anterior
+        }
+        process.stdin.pause();
+      };
 
-    rl.question('', (answer) => {
-      isPrompting = false;
-      rl.close();
-      resolve(answer.trim());
-    });
+      const onData = (chunk) => {
+        const str = String(chunk);
+        for (const char of str) {
+          if (char === '\u0003') {
+            // Interrupção graciosa com Ctrl+C (SIGINT)
+            cleanup();
+            process.stdout.write('\n\nOperação cancelada pelo usuário (Ctrl+C).\n');
+            process.exit(130);
+          } else if (char === '\r' || char === '\n') {
+            // Confirmação de entrada (Enter)
+            cleanup();
+            process.stdout.write('\n');
+            resolve(password.trim());
+            return;
+          } else if (char === '\u0004') {
+            // EOF (Ctrl+D)
+            cleanup();
+            process.stdout.write('\n');
+            resolve(password.trim());
+            return;
+          } else if (char === '\u0008' || char === '\x7f') {
+            // Backspace / Delete: remove último caractere sem emitir eco
+            password = password.slice(0, -1);
+          } else if (char >= ' ' || char === '\t') {
+            // Caractere imprimível ou tabulação: acumula na memória sem exibir na tela
+            password += char;
+          }
+        }
+      };
+
+      process.stdin.on('data', onData);
+    } else {
+      // Fallback para ambientes sem TTY ou pipelines de automação e testes locais
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        terminal: false,
+      });
+
+      let resolved = false;
+
+      rl.on('SIGINT', () => {
+        rl.close();
+        process.stdout.write('\n\nOperação cancelada pelo usuário (Ctrl+C).\n');
+        process.exit(130);
+      });
+
+      rl.question(promptText, (answer) => {
+        resolved = true;
+        rl.close();
+        resolve(answer.trim());
+      });
+
+      rl.on('close', () => {
+        if (!resolved) {
+          resolve('');
+        }
+      });
+    }
   });
 }
 

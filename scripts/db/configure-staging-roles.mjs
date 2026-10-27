@@ -51,6 +51,12 @@ export const CANONICAL_SUPABASE_CA_FINGERPRINT_SHA256 = Object.freeze(
   '80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA'
 );
 
+export const ROLE_DESCRIPTIONS = Object.freeze({
+  medicina_app: 'Server Actions, runtime principal e queries sob contexto RLS',
+  medicina_auth: 'Autenticação restrita NextAuth e conferência de allowlist',
+  medicina_worker: 'Worker assíncrono e pipeline de ingestão de documentos do acervo',
+});
+
 /**
  * Solicita confirmação humana explícita no terminal
  */
@@ -60,6 +66,13 @@ export function promptConfirmation(promptText = 'Digite "CONFIRMAR CONFIGURACAO 
       input: process.stdin,
       output: process.stdout,
     });
+
+    rl.on('SIGINT', () => {
+      rl.close();
+      process.stdout.write('\n\nOperação cancelada pelo usuário (Ctrl+C).\n');
+      process.exit(130);
+    });
+
     rl.question(promptText, (answer) => {
       rl.close();
       resolve(answer.trim());
@@ -72,18 +85,19 @@ export function promptConfirmation(promptText = 'Digite "CONFIRMAR CONFIGURACAO 
  */
 export async function promptPasswordWithConfirmation(roleName) {
   while (true) {
-    const pwd1 = await promptHiddenPassword(`Digite a nova senha para [${roleName}]: `);
+    const pwd1 = await promptHiddenPassword(`🔑 Digite a nova senha para [${roleName}]: `);
     if (!pwd1 || pwd1.length < 16) {
       console.log('⚠️  A senha deve conter no mínimo 16 caracteres. Tente novamente.\n');
       continue;
     }
 
-    const pwd2 = await promptHiddenPassword(`Confirme a nova senha para [${roleName}]: `);
+    const pwd2 = await promptHiddenPassword(`🔑 Confirme a nova senha para [${roleName}]: `);
     if (pwd1 !== pwd2) {
       console.log('❌ As senhas não conferem. Tente novamente.\n');
       continue;
     }
 
+    console.log(`   ✓ Senha para [${roleName}] validada localmente.`);
     return pwd1;
   }
 }
@@ -257,28 +271,52 @@ async function main() {
   console.log(`Roles a Configurar:  ${ALLOWED_STAGING_ROLES.join(', ')}`);
   console.log('================================================================\n');
 
+  console.log('Orientações de Segurança:');
+  console.log('  • As senhas digitadas NÃO serão exibidas na tela (sem eco).');
+  console.log('  • Cada senha técnica deve possuir no mínimo 16 caracteres.');
+  console.log('  • Pressione Ctrl+C a qualquer momento para cancelar com segurança.\n');
+
   let adminPassword = '';
   let appPassword = '';
   let authPassword = '';
   let workerPassword = '';
 
   try {
-    adminPassword = await promptHiddenPassword('Digite a senha da role postgres do Supabase: ');
-    if (!adminPassword) {
-      console.error('❌ Senha administrativa não fornecida. Abortando.');
+    console.log('[Etapa 1/4] Senha Administrativa do Staging');
+    console.log(`Autenticação primária como "${TARGET_USERNAME}" no Session Pooler.`);
+    adminPassword = await promptHiddenPassword('🔑 Digite a senha da role postgres do Supabase: ');
+    if (!adminPassword || adminPassword.trim().length === 0) {
+      console.error('\n❌ Senha administrativa não fornecida (vazia). Abortando.');
       process.exit(1);
     }
+    console.log('');
 
-    console.log('\n--- Definição das Senhas Técnicas (mínimo 16 caracteres) ---');
+    console.log('[Etapa 2/4] Nova Senha para medicina_app');
+    console.log(`Finalidade: ${ROLE_DESCRIPTIONS.medicina_app}`);
+    console.log('Requisito:  Mínimo de 16 caracteres de alta entropia');
     appPassword = await promptPasswordWithConfirmation('medicina_app');
     console.log('');
+
+    console.log('[Etapa 3/4] Nova Senha para medicina_auth');
+    console.log(`Finalidade: ${ROLE_DESCRIPTIONS.medicina_auth}`);
+    console.log('Requisito:  Mínimo de 16 caracteres de alta entropia');
     authPassword = await promptPasswordWithConfirmation('medicina_auth');
     console.log('');
+
+    console.log('[Etapa 4/4] Nova Senha para medicina_worker');
+    console.log(`Finalidade: ${ROLE_DESCRIPTIONS.medicina_worker}`);
+    console.log('Requisito:  Mínimo de 16 caracteres de alta entropia');
     workerPassword = await promptPasswordWithConfirmation('medicina_worker');
     console.log('');
 
-    console.log('⚠️  ATENÇÃO: As senhas de conexão das roles de staging serão atualizadas no banco.');
-    const confirmation = await promptConfirmation();
+    console.log('================================================================');
+    console.log('⚠️  CONFIRMAÇÃO DE APLICAÇÃO NO BANCO DE DADOS');
+    console.log('As senhas acima serão gravadas no Supabase Staging via transação');
+    console.log('protegida com TLS estrito e verificação de integridade.');
+    console.log('Para confirmar a aplicação imediata, digite exatamente:');
+    console.log('   CONFIRMAR CONFIGURACAO ROLES');
+    console.log('================================================================');
+    const confirmation = await promptConfirmation('Confirmação: ');
 
     await configureStagingRolePasswords({
       confirmation,

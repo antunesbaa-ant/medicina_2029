@@ -50,6 +50,13 @@ export function promptConfirmation(promptText = 'Digite "CONFIRMAR SEED STAGING"
       input: process.stdin,
       output: process.stdout,
     });
+
+    rl.on('SIGINT', () => {
+      rl.close();
+      process.stdout.write('\n\nOperação cancelada pelo usuário (Ctrl+C).\n');
+      process.exit(130);
+    });
+
     rl.question(promptText, (answer) => {
       rl.close();
       resolve(answer.trim());
