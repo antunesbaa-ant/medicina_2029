@@ -36,6 +36,8 @@ import {
   readSync,
   unlinkSync,
 } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 
 const MAGIC_BYTES = Buffer.from('M29G', 'ascii'); // 4 bytes
@@ -62,7 +64,7 @@ function deriveKey(passphrase, salt) {
 /**
  * Cifragem Autenticada AEAD (AES-256-GCM) com Envelope M29G
  */
-async function encryptFile(inFile, outFile, passphrase) {
+export async function encryptFile(inFile, outFile, passphrase) {
   if (!existsSync(inFile)) {
     throw new Error(`Arquivo de entrada não encontrado: ${inFile}`);
   }
@@ -127,7 +129,7 @@ async function encryptFile(inFile, outFile, passphrase) {
 /**
  * Decifragem Autenticada com detecção de adulteração e suporte retroativo a CBC
  */
-async function decryptFile(inFile, outFile, passphrase) {
+export async function decryptFile(inFile, outFile, passphrase) {
   if (!existsSync(inFile)) {
     throw new Error(`Arquivo de entrada não encontrado: ${inFile}`);
   }
@@ -250,4 +252,6 @@ async function main() {
   }
 }
 
-main();
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+  main();
+}
