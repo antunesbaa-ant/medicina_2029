@@ -8,6 +8,13 @@ set -euo pipefail
 # ------------------------------------------------------------------------------
 # 1. PARÂMETROS E CONFIGURAÇÕES
 # ------------------------------------------------------------------------------
+# Inclui diretórios padrão do libpq no macOS se presentes
+if [[ -d "/opt/homebrew/opt/libpq/bin" ]]; then
+  export PATH="/opt/homebrew/opt/libpq/bin:${PATH}"
+elif [[ -d "/usr/local/opt/libpq/bin" ]]; then
+  export PATH="/usr/local/opt/libpq/bin:${PATH}"
+fi
+
 if [[ $# -lt 1 ]]; then
   echo "Uso: $0 <caminho_do_diretorio_de_backup> [banco_alvo]"
   echo "Exemplo: $0 ./backups/medicina2029_backup_20261021_030000Z medicina2029_staging"
@@ -25,6 +32,17 @@ ENCRYPTION_METHOD="${ENCRYPTION_METHOD:-auto}" # auto | openssl | gpg | none
 RESTORE_GLOBALS="${RESTORE_GLOBALS:-false}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-4}"
 
+# SALVAGUARDA DE SEGURANÇA: Bloqueio estrito contra restauração no Supabase remoto
+if [[ "${TARGET_PGHOST}" =~ supabase\.co || "${TARGET_PGHOST}" =~ pooler\.supabase\.com ]]; then
+  echo "======================================================================" >&2
+  echo "VIOLAÇÃO CRÍTICA DE SEGURANÇA (FAIL-CLOSED):" >&2
+  echo "É terminantemente proibido utilizar o Supabase remoto como destino" >&2
+  echo "de restauração de backup! Alvo informado: ${TARGET_PGHOST}" >&2
+  echo "A restauração deve ocorrer exclusivamente em PostgreSQL descartável local." >&2
+  echo "======================================================================" >&2
+  exit 1
+fi
+
 TMP_RESTORE_DIR=$(mktemp -d -t medicina2029_restore_XXXXXX)
 trap 'rm -rf "${TMP_RESTORE_DIR}"' EXIT
 
@@ -41,13 +59,36 @@ echo "======================================================================"
 # ------------------------------------------------------------------------------
 # 2. LOCALIZAÇÃO E DECIFRAGEM DOS ARQUIVOS
 # ------------------------------------------------------------------------------
-MANIFEST_FILE=$(find "${SOURCE_DIR}" -maxdepth 1 -name "*_manifest.json" | head -n 1)
-if [[ -z "${MANIFEST_FILE}" || ! -f "${MANIFEST_FILE}" ]]; then
-  echo "ERRO CRÍTICO: Arquivo de manifesto (*_manifest.json) não encontrado em ${SOURCE_DIR}." >&2
-  exit 1
+ENC_DUMP=$(find "${SOURCE_DIR}" -maxdepth 1 \( -name "*.dump.enc" -o -name "*.dump.gpg" \) | head -n 1 || true)
+RAW_DUMP=$(find "${SOURCE_DIR}" -maxdepth 1 -name "*.dump" | head -n 1 || true)
+RAW_MANIFEST=$(find "${SOURCE_DIR}" -maxdepth 1 -name "*_manifest.json" | head -n 1 || true)
+ENC_MANIFEST=$(find "${SOURCE_DIR}" -maxdepth 1 -name "*_manifest.json.enc" | head -n 1 || true)
+
+# Se necessário, solicita senha interativa sem eco
+if [[ (-n "${ENC_DUMP}" || -n "${ENC_MANIFEST}") && -z "${BACKUP_ENCRYPTION_KEY}" ]]; then
+  if [[ -t 0 ]]; then
+    echo -n "🔑 Digite a chave mestra de descriptografia do backup: "
+    read -r -s BACKUP_ENCRYPTION_KEY
+    echo ""
+  else
+    echo "ERRO CRÍTICO: BACKUP_ENCRYPTION_KEY não definida no ambiente para execução não-interativa." >&2
+    exit 1
+  fi
 fi
 
-echo "[$(date -u)] Manifesto identificado: ${MANIFEST_FILE}"
+# Decifra ou localiza o manifesto
+MANIFEST_FILE="${TMP_RESTORE_DIR}/manifest.json"
+if [[ -n "${RAW_MANIFEST}" && -f "${RAW_MANIFEST}" ]]; then
+  echo "[$(date -u)] Manifesto em texto claro identificado: ${RAW_MANIFEST}"
+  cp "${RAW_MANIFEST}" "${MANIFEST_FILE}"
+elif [[ -n "${ENC_MANIFEST}" && -f "${ENC_MANIFEST}" ]]; then
+  echo "[$(date -u)] Decifrando manifesto criptografado (${ENC_MANIFEST})..."
+  CRYPTO_SCRIPT="$(dirname "$0")/crypto_envelope.mjs"
+  node "${CRYPTO_SCRIPT}" decrypt "${ENC_MANIFEST}" "${MANIFEST_FILE}"
+else
+  echo "ERRO CRÍTICO: Arquivo de manifesto (*_manifest.json ou *_manifest.json.enc) não encontrado em ${SOURCE_DIR}." >&2
+  exit 1
+fi
 
 ENC_DUMP=$(find "${SOURCE_DIR}" -maxdepth 1 -name "*.dump.enc" -o -name "*.dump.gpg" | head -n 1 || true)
 RAW_DUMP=$(find "${SOURCE_DIR}" -maxdepth 1 -name "*.dump" | head -n 1 || true)
@@ -95,7 +136,11 @@ fi
 # 3. VALIDAÇÃO DE INTEGRIDADE SHA-256 E TABELA DE CONTEÚDOS (TOC)
 # ------------------------------------------------------------------------------
 echo "[$(date -u)] Verificando hash SHA-256 do dump decifrado contra o manifesto..."
-CALCULATED_SHA256=$(sha256sum "${DUMP_TO_RESTORE}" | awk '{print $1}')
+if command -v sha256sum &>/dev/null; then
+  CALCULATED_SHA256=$(sha256sum "${DUMP_TO_RESTORE}" | awk '{print $1}')
+else
+  CALCULATED_SHA256=$(shasum -a 256 "${DUMP_TO_RESTORE}" | awk '{print $1}')
+fi
 EXPECTED_SHA256=$(grep -o '"dump_sha256": "[^"]*"' "${MANIFEST_FILE}" | cut -d'"' -f4)
 
 if [[ "${CALCULATED_SHA256}" != "${EXPECTED_SHA256}" ]]; then

@@ -115,6 +115,7 @@ export function findPgDumpBinary(explicitPath) {
   }
 
   const commonMacPaths = [
+    '/opt/homebrew/opt/libpq/bin/pg_dump',
     '/opt/homebrew/bin/pg_dump',
     '/usr/local/bin/pg_dump',
     '/Applications/Postgres.app/Contents/Versions/latest/bin/pg_dump',
@@ -123,6 +124,42 @@ export function findPgDumpBinary(explicitPath) {
     '/Applications/Postgres.app/Contents/Versions/16/bin/pg_dump',
     '/Applications/Postgres.app/Contents/Versions/15/bin/pg_dump',
     '/usr/bin/pg_dump',
+  ];
+
+  for (const candidate of commonMacPaths) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Procura o binário pg_restore no PATH e locais padronizados do macOS
+ */
+export function findPgRestoreBinary(explicitPath) {
+  if (explicitPath) {
+    const resolved = path.resolve(explicitPath.replace(/^~(?=$|\/|\\)/, os.homedir()));
+    if (fs.existsSync(resolved)) {
+      return resolved;
+    }
+  }
+
+  if (process.env.PG_RESTORE_PATH && fs.existsSync(process.env.PG_RESTORE_PATH)) {
+    return process.env.PG_RESTORE_PATH;
+  }
+
+  const commonMacPaths = [
+    '/opt/homebrew/opt/libpq/bin/pg_restore',
+    '/opt/homebrew/bin/pg_restore',
+    '/usr/local/bin/pg_restore',
+    '/Applications/Postgres.app/Contents/Versions/latest/bin/pg_restore',
+    '/Applications/Postgres.app/Contents/Versions/18/bin/pg_restore',
+    '/Applications/Postgres.app/Contents/Versions/17/bin/pg_restore',
+    '/Applications/Postgres.app/Contents/Versions/16/bin/pg_restore',
+    '/Applications/Postgres.app/Contents/Versions/15/bin/pg_restore',
+    '/usr/bin/pg_restore',
   ];
 
   for (const candidate of commonMacPaths) {
