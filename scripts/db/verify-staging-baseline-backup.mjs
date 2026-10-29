@@ -360,11 +360,16 @@ export function diagnoseRestoreInfrastructure() {
     result.hasDocker = false;
   }
 
-  // Verifica se há PostgreSQL escutando na porta 5432 local
+  // Verifica se há PostgreSQL escutando na porta 5433 ou 5432 local
   try {
-    const lsof = spawnSync('lsof', ['-i', ':5432'], { encoding: 'utf8' });
+    const lsof = spawnSync('lsof', ['-i', ':5433'], { encoding: 'utf8' });
     if (lsof.status === 0 && lsof.stdout.includes('LISTEN')) {
       result.hasLocalPostgresServer = true;
+    } else {
+      const lsof5432 = spawnSync('lsof', ['-i', ':5432'], { encoding: 'utf8' });
+      if (lsof5432.status === 0 && lsof5432.stdout.includes('LISTEN')) {
+        result.hasLocalPostgresServer = true;
+      }
     }
   } catch {
     result.hasLocalPostgresServer = false;
@@ -376,8 +381,9 @@ export function diagnoseRestoreInfrastructure() {
     );
     result.recommendedAction =
       'Para executar a RESTAURAÇÃO TESTADA em ambiente 100% isolado sem risco ao Supabase remoto:\n' +
-      '  Opção 1 (Docker): docker run --rm -d --name pg-test-restore -p 5433:5432 -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg16\n' +
-      '  Opção 2 (Homebrew): brew install postgresql@16 && brew services start postgresql@16\n' +
+      '  Opção 1 (Docker - Recomendada): docker run --rm -d --name pg-test-restore -p 127.0.0.1:5433:5432 -e POSTGRES_HOST_AUTH_METHOD=trust pgvector/pgvector:pg18-trixie\n' +
+      '  Atenção de Compatibilidade: O dump foi gerado por pg_dump 18.6; servidores PG 16 não possuem compatibilidade garantida com dumps do PG 18.\n' +
+      '  Opção 2 (Homebrew): brew install postgresql@16 && brew services start postgresql@16 (sujeito a avisos de downgrade de versão)\n' +
       '  NUNCA executar restauração apontando para o host remoto do Supabase!';
   }
 
@@ -389,14 +395,21 @@ export function diagnoseRestoreInfrastructure() {
  */
 export function validateRestoreTarget(targetHost) {
   if (!targetHost) return true;
+  const normalized = targetHost.toLowerCase().trim();
   if (
-    targetHost.includes('supabase.co') ||
-    targetHost.includes('pooler.supabase.com') ||
-    targetHost.includes('aws-0-us-east-1')
+    normalized.includes('supabase.co') ||
+    normalized.includes('pooler.supabase.com') ||
+    normalized.includes('aws-0-us-east-1')
   ) {
     throw new Error(
       `BLOQUEIO CRÍTICO DE SEGURANÇA: O host "${targetHost}" é um endpoint do Supabase remoto!\n` +
         'A restauração é terminantemente restrita a instâncias locais, temporárias e descartáveis.'
+    );
+  }
+  if (normalized !== 'localhost' && normalized !== '127.0.0.1') {
+    throw new Error(
+      `BLOQUEIO DE ISOLAMENTO LOCAL: O host "${targetHost}" não é um loopback local permitido (127.0.0.1 ou localhost).\n` +
+        'A restauração deve ocorrer estritamente em ambiente isolado local e descartável.'
     );
   }
   return true;

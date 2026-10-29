@@ -24,16 +24,16 @@ fi
 SOURCE_DIR="$1"
 TARGET_PGDATABASE="${2:-medicina2029_staging}"
 
-TARGET_PGHOST="${TARGET_PGHOST:-localhost}"
-TARGET_PGPORT="${TARGET_PGPORT:-5432}"
+TARGET_PGHOST="${TARGET_PGHOST:-127.0.0.1}"
+TARGET_PGPORT="${TARGET_PGPORT:-5433}"
 TARGET_PGUSER="${TARGET_PGUSER:-postgres}"
 BACKUP_ENCRYPTION_KEY="${BACKUP_ENCRYPTION_KEY:-}"
 ENCRYPTION_METHOD="${ENCRYPTION_METHOD:-auto}" # auto | openssl | gpg | none
 RESTORE_GLOBALS="${RESTORE_GLOBALS:-false}"
 PARALLEL_JOBS="${PARALLEL_JOBS:-4}"
 
-# SALVAGUARDA DE SEGURANÇA: Bloqueio estrito contra restauração no Supabase remoto
-if [[ "${TARGET_PGHOST}" =~ supabase\.co || "${TARGET_PGHOST}" =~ pooler\.supabase\.com ]]; then
+# SALVAGUARDA DE SEGURANÇA: Bloqueio estrito contra restauração no Supabase remoto ou qualquer host externo (FAIL-CLOSED)
+if [[ "${TARGET_PGHOST}" =~ supabase\.co || "${TARGET_PGHOST}" =~ pooler\.supabase\.com || "${TARGET_PGHOST}" =~ aws-0-us-east-1 ]]; then
   echo "======================================================================" >&2
   echo "VIOLAÇÃO CRÍTICA DE SEGURANÇA (FAIL-CLOSED):" >&2
   echo "É terminantemente proibido utilizar o Supabase remoto como destino" >&2
@@ -43,8 +43,23 @@ if [[ "${TARGET_PGHOST}" =~ supabase\.co || "${TARGET_PGHOST}" =~ pooler\.supaba
   exit 1
 fi
 
+if [[ "${TARGET_PGHOST}" != "127.0.0.1" && "${TARGET_PGHOST}" != "localhost" ]]; then
+  echo "======================================================================" >&2
+  echo "VIOLAÇÃO DE ISOLAMENTO LOCAL (FAIL-CLOSED):" >&2
+  echo "A restauração só é permitida em loopback local (127.0.0.1 ou localhost)." >&2
+  echo "Host externo/não-local expressamente recusado: ${TARGET_PGHOST}" >&2
+  echo "======================================================================" >&2
+  exit 1
+fi
+
 TMP_RESTORE_DIR=$(mktemp -d -t medicina2029_restore_XXXXXX)
-trap 'rm -rf "${TMP_RESTORE_DIR}"' EXIT
+chmod 700 "${TMP_RESTORE_DIR}"
+cleanup() {
+  if [[ -d "${TMP_RESTORE_DIR}" ]]; then
+    rm -rf "${TMP_RESTORE_DIR}"
+  fi
+}
+trap cleanup EXIT INT TERM HUP
 
 LOG_FILE="${TMP_RESTORE_DIR}/restore.log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
@@ -156,31 +171,63 @@ pg_restore --list "${DUMP_TO_RESTORE}" > /dev/null
 echo "[$(date -u)] Tabela de conteúdos íntegra."
 
 # ------------------------------------------------------------------------------
-# 4. PREPARAÇÃO DO BANCO ALVO E EXTENSÕES
+# 4. PREPARAÇÃO DO BANCO ALVO E DEPENDÊNCIAS (H2.03-R2A)
 # ------------------------------------------------------------------------------
-echo "[$(date -u)] Preparando banco de destino: ${TARGET_PGDATABASE}..."
+echo "[$(date -u)] Preparando banco de destino e dependências no ambiente descartável: ${TARGET_PGDATABASE}..."
 psql -h "${TARGET_PGHOST}" -p "${TARGET_PGPORT}" -U "${TARGET_PGUSER}" -d postgres -v ON_ERROR_STOP=1 << EOSQL
 SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${TARGET_PGDATABASE}' AND pid <> pg_backend_pid();
 DROP DATABASE IF EXISTS "${TARGET_PGDATABASE}";
 CREATE DATABASE "${TARGET_PGDATABASE}";
+
+-- Prepara roles técnicas locais NOLOGIN para satisfazer integridade de catálogo/RLS
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_app') THEN
+    CREATE ROLE medicina_app NOLOGIN NOBYPASSRLS;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_auth') THEN
+    CREATE ROLE medicina_auth NOLOGIN NOBYPASSRLS;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'medicina_worker') THEN
+    CREATE ROLE medicina_worker NOLOGIN NOBYPASSRLS;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    CREATE ROLE anon NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    CREATE ROLE authenticated NOLOGIN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    CREATE ROLE service_role NOLOGIN;
+  END IF;
+END \$\$;
 EOSQL
 
-echo "[$(date -u)] Instalando extensões obrigatórias no banco alvo..."
+echo "[$(date -u)] Configurando schema extensions, extensões e search_path no banco alvo..."
 psql -h "${TARGET_PGHOST}" -p "${TARGET_PGPORT}" -U "${TARGET_PGUSER}" -d "${TARGET_PGDATABASE}" -v ON_ERROR_STOP=1 << EOSQL
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE EXTENSION IF NOT EXISTS unaccent;
-CREATE EXTENSION IF NOT EXISTS vector;
+-- Schema extensions isolado idêntico à convenção Supabase
+CREATE SCHEMA IF NOT EXISTS extensions;
+
+-- Instalação de extensões obrigatórias no schema extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp" SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS pgcrypto SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS unaccent SCHEMA extensions;
+CREATE EXTENSION IF NOT EXISTS vector SCHEMA extensions;
+
+-- Configuração de search_path compatível
+ALTER DATABASE "${TARGET_PGDATABASE}" SET search_path TO public, extensions;
+
+-- Remove o schema public vazio inicial gerado pelo template para permitir que pg_restore recrie public e medicina de forma limpa
+DROP SCHEMA IF EXISTS public CASCADE;
 EOSQL
 
 # ------------------------------------------------------------------------------
-# 5. RESTAURAÇÃO COMPLETA COM PG_RESTORE
+# 5. RESTAURAÇÃO COMPLETA COM PG_RESTORE (EXIGÊNCIA DE ERRO FATAL EM FALHA)
 # ------------------------------------------------------------------------------
 echo "[$(date -u)] Executando pg_restore (jobs paralelos: ${PARALLEL_JOBS})..."
 
-# Observação: Usamos --no-owner e --no-privileges para garantir compatibilidade
-# com diferentes ambientes de homologação e staging.
-pg_restore \
+# Exigir pg_restore com erro fatal em falha. Não declarar sucesso com erros ignorados.
+if ! pg_restore \
   -h "${TARGET_PGHOST}" \
   -p "${TARGET_PGPORT}" \
   -U "${TARGET_PGUSER}" \
@@ -189,9 +236,20 @@ pg_restore \
   --no-privileges \
   --verbose \
   --jobs="${PARALLEL_JOBS}" \
-  "${DUMP_TO_RESTORE}" || {
-    echo "AVISO: pg_restore finalizou com avisos/erros não fatais (ex: extensões já pré-criadas)."
-  }
+  "${DUMP_TO_RESTORE}"; then
+  echo "======================================================================" >&2
+  echo "ERRO FATAL: pg_restore falhou durante a reconstituição dos objetos!" >&2
+  echo "Operação abortada sumariamente (fail-closed)." >&2
+  echo "======================================================================" >&2
+  exit 1
+fi
+echo "[$(date -u)] pg_restore concluído com código de saída ZERO (100% de sucesso sem erros ignorados)."
+
+# LIMPEZA IMEDIATA: Remoção imediata do dump decifrado após a restauração
+if [[ -f "${DUMP_TO_RESTORE}" ]]; then
+  rm -f "${DUMP_TO_RESTORE}"
+  echo "[$(date -u)] Arquivo de dump temporário decifrado removido com sucesso (zero cópias claras mantidas)."
+fi
 
 # ------------------------------------------------------------------------------
 # 6. VERIFICAÇÃO DE INTEGRIDADE E CONFERÊNCIA DE CONTAGENS
