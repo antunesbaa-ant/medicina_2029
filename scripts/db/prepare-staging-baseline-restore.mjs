@@ -155,7 +155,7 @@ export const APTO_CRITERIA = [
   '7. Todas as 4 extensões presentes: vector (0.8.2), unaccent, pgcrypto, uuid-ossp.',
   '8. Todas as 35 tabelas de domínio presentes no schema public + schema medicina.',
   '9. Paridade exata de contagens contra o inventário real do manifesto: public.allowlist = 2, 34 tabelas = 0 registros.',
-  '10. 100% das tabelas de domínio com RLS ativado (rowsecurity = true) e políticas auditadas.',
+  '10. 100% das tabelas de domínio com RLS ativado (relrowsecurity = true no catálogo pg_class) e políticas auditadas.',
   '11. Funções críticas existentes: autenticar_por_email, fn_busca_hibrida_acervo, gerar_hash_questao, etc.',
   '12. Índice vetorial HNSW em acervo_chunks.embedding presente com vector_cosine_ops.',
   '13. Tabela _medicina_staging_migrations presente com exatamente as 9 migrações canônicas ordenadas.',

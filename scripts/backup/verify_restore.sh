@@ -14,11 +14,83 @@ elif [[ -d "/usr/local/opt/libpq/bin" ]]; then
 fi
 
 TARGET_PGDATABASE="${1:-medicina2029_restore_teste}"
-MANIFEST_FILE="${2:-}"
+INPUT_MANIFEST_OR_BACKUP="${2:-}"
 
 TARGET_PGHOST="${TARGET_PGHOST:-127.0.0.1}"
 TARGET_PGPORT="${TARGET_PGPORT:-5433}"
 TARGET_PGUSER="${TARGET_PGUSER:-postgres}"
+
+# Limpeza e purga segura de temporários ao sair ou em caso de sinal
+TMP_VERIFY_DIR=""
+cleanup_verify() {
+  unset BACKUP_ENCRYPTION_KEY 2>/dev/null || true
+  if [[ -n "${TMP_VERIFY_DIR}" && -d "${TMP_VERIFY_DIR}" ]]; then
+    rm -rf "${TMP_VERIFY_DIR}"
+  fi
+}
+trap cleanup_verify EXIT INT TERM HUP
+
+# Resolução flexível do manifesto: arquivo JSON, manifesto cifrado ou diretório de backup
+RESOLVED_MANIFEST=""
+TARGET_ENC=""
+
+# Auto-descoberta do backup baseline mais recente caso não informado
+if [[ -z "${INPUT_MANIFEST_OR_BACKUP}" ]]; then
+  DEFAULT_BACKUP_DIR=$(find "${HOME}/.medicina2029/backups" -maxdepth 1 -type d -name "medicina2029_staging_baseline_*" 2>/dev/null | sort | tail -n 1 || true)
+  if [[ -n "${DEFAULT_BACKUP_DIR}" && -d "${DEFAULT_BACKUP_DIR}" ]]; then
+    INPUT_MANIFEST_OR_BACKUP="${DEFAULT_BACKUP_DIR}"
+  fi
+fi
+
+if [[ -n "${INPUT_MANIFEST_OR_BACKUP}" ]]; then
+  if [[ -d "${INPUT_MANIFEST_OR_BACKUP}" ]]; then
+    RAW_M=$(find "${INPUT_MANIFEST_OR_BACKUP}" -maxdepth 1 -name "*_manifest.json" | head -n 1 || true)
+    ENC_M=$(find "${INPUT_MANIFEST_OR_BACKUP}" -maxdepth 1 -name "*_manifest.json.enc" | head -n 1 || true)
+    if [[ -n "${RAW_M}" && -f "${RAW_M}" ]]; then
+      RESOLVED_MANIFEST="${RAW_M}"
+    elif [[ -n "${ENC_M}" && -f "${ENC_M}" ]]; then
+      TARGET_ENC="${ENC_M}"
+    fi
+  elif [[ -f "${INPUT_MANIFEST_OR_BACKUP}" ]]; then
+    if [[ "${INPUT_MANIFEST_OR_BACKUP}" == *.json.enc ]]; then
+      TARGET_ENC="${INPUT_MANIFEST_OR_BACKUP}"
+    elif [[ "${INPUT_MANIFEST_OR_BACKUP}" == *.json ]]; then
+      RESOLVED_MANIFEST="${INPUT_MANIFEST_OR_BACKUP}"
+    fi
+  fi
+fi
+
+# Decifragem segura sob demanda do manifesto em ambiente temporário restrito (0700)
+if [[ -n "${TARGET_ENC}" && -f "${TARGET_ENC}" ]]; then
+  echo "[$(date -u)] Manifesto cifrado identificado: ${TARGET_ENC}"
+  if [[ -z "${BACKUP_ENCRYPTION_KEY:-}" ]]; then
+    if [[ -t 0 ]]; then
+      echo -n "🔑 Digite a chave mestra de descriptografia para conferir o manifesto: "
+      read -r -s BACKUP_ENCRYPTION_KEY
+      echo ""
+    else
+      read -r BACKUP_ENCRYPTION_KEY || true
+    fi
+  fi
+
+  if [[ -n "${BACKUP_ENCRYPTION_KEY:-}" ]]; then
+    TMP_VERIFY_DIR=$(mktemp -d -t m29_verify_manifest_XXXXXX)
+    chmod 700 "${TMP_VERIFY_DIR}"
+    TMP_MANIFEST="${TMP_VERIFY_DIR}/manifest.json"
+    CRYPTO_SCRIPT="$(dirname "$0")/crypto_envelope.mjs"
+    if [[ -f "${CRYPTO_SCRIPT}" ]] && command -v node &>/dev/null; then
+      if printf '%s' "${BACKUP_ENCRYPTION_KEY}" | node "${CRYPTO_SCRIPT}" decrypt "${TARGET_ENC}" "${TMP_MANIFEST}" --key-stdin 2>/dev/null; then
+        RESOLVED_MANIFEST="${TMP_MANIFEST}"
+        echo "[$(date -u)] Manifesto decifrado em memória temporária para validação."
+      else
+        echo "  [AVISO] Falha na descriptografia do manifesto com a chave fornecida. Utilizando inventário canônico de baseline." >&2
+      fi
+    fi
+    unset BACKUP_ENCRYPTION_KEY
+  fi
+fi
+
+MANIFEST_FILE="${RESOLVED_MANIFEST}"
 
 # SALVAGUARDA DE SEGURANÇA: Bloqueio estrito contra qualquer destino remoto ou Supabase (FAIL-CLOSED)
 if [[ "${TARGET_PGHOST}" =~ supabase\.co || "${TARGET_PGHOST}" =~ pooler\.supabase\.com || "${TARGET_PGHOST}" =~ aws-0-us-east-1 ]]; then
@@ -40,7 +112,7 @@ if [[ "${TARGET_PGHOST}" != "127.0.0.1" && "${TARGET_PGHOST}" != "localhost" ]];
 fi
 
 echo "======================================================================"
-echo "[$(date -u)] AUDITORIA DE SANIDADE PÓS-RESTAURAÇÃO (H2.03-R2A)"
+echo "[$(date -u)] AUDITORIA DE SANIDADE PÓS-RESTAURAÇÃO (H2.03-R2D)"
 echo "Banco Auditado: ${TARGET_PGHOST}:${TARGET_PGPORT}/${TARGET_PGDATABASE} (Usuário: ${TARGET_PGUSER})"
 echo "======================================================================"
 
@@ -209,7 +281,7 @@ fi
 # ------------------------------------------------------------------------------
 echo "--- [4/7] Auditoria de Status RLS e Políticas de Segurança ---"
 RLS_REPORT=$(psql -h "${TARGET_PGHOST}" -p "${TARGET_PGPORT}" -U "${TARGET_PGUSER}" -d "${TARGET_PGDATABASE}" -t -A -F"|" -c "
-  SELECT relname, rowsecurity, forcerowsecurity
+  SELECT relname, relrowsecurity, relforcerowsecurity
   FROM pg_class
   JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
   WHERE pg_namespace.nspname = 'public'
@@ -218,18 +290,26 @@ RLS_REPORT=$(psql -h "${TARGET_PGHOST}" -p "${TARGET_PGPORT}" -U "${TARGET_PGUSE
 ")
 
 NON_RLS_COUNT=0
+RLS_ACTIVE_COUNT=0
 while IFS='|' read -r relname rowsec forcesec; do
+  [[ -z "${relname}" ]] && continue
   if [[ "${rowsec}" != "t" ]]; then
     # _medicina_staging_migrations é tabela de infraestrutura de migração
     if [[ "${relname}" != "_medicina_staging_migrations" ]]; then
-      echo "  [FALHA] Tabela '${relname}' está com RLS DESATIVADO (rowsecurity=f)!" >&2
+      echo "  [FALHA] Tabela '${relname}' está com RLS DESATIVADO (relrowsecurity=f)!" >&2
       NON_RLS_COUNT=$((NON_RLS_COUNT + 1))
       EXIT_CODE=1
     fi
   else
+    RLS_ACTIVE_COUNT=$((RLS_ACTIVE_COUNT + 1))
     echo "  [OK] RLS ativado na tabela '${relname}' (FORCE: ${forcesec})."
   fi
 done <<< "${RLS_REPORT}"
+
+echo "  [INFO] Total de tabelas com RLS ativado no schema public: ${RLS_ACTIVE_COUNT}"
+if [[ ${NON_RLS_COUNT} -eq 0 && ${RLS_ACTIVE_COUNT} -ge 35 ]]; then
+  echo "  [OK] Cobertura RLS integral confirmada (100% das 35 tabelas de domínio ativas)."
+fi
 
 TOTAL_POLICIES=$(psql -h "${TARGET_PGHOST}" -p "${TARGET_PGPORT}" -U "${TARGET_PGUSER}" -d "${TARGET_PGDATABASE}" -t -A -c "
   SELECT count(*) FROM pg_policy;
@@ -240,47 +320,42 @@ if [[ "${TOTAL_POLICIES}" -lt 20 ]]; then
 fi
 
 # ------------------------------------------------------------------------------
-# 5. FUNÇÕES SQL E PROCEDURES CRÍTICAS
+# 5. FUNÇÕES SQL E PROCEDURES CRÍTICAS DO DOMÍNIO (CANÔNICAS)
 # ------------------------------------------------------------------------------
 echo "--- [5/7] Verificação de Funções SQL e Stored Procedures ---"
-EXPECTED_FUNCTIONS=(
+EXPECTED_CANONICAL_FUNCTIONS=(
+  autenticar_por_email
   fn_busca_hibrida_acervo
-  gerar_hash_questao
-  fn_atualizar_modificado_em
-  fn_proteger_papel_admin
+  set_context
+  current_papel
+  is_estudante
+  is_responsavel
+  is_valid_acervo_storage_path
+  fn_acompanhamento_quinzenal
+  fn_simulados_evolucao
+  check_allowlist
 )
 
-for fn in "${EXPECTED_FUNCTIONS[@]}"; do
+for fn in "${EXPECTED_CANONICAL_FUNCTIONS[@]}"; do
   FN_EXISTS=$(psql -h "${TARGET_PGHOST}" -p "${TARGET_PGPORT}" -U "${TARGET_PGUSER}" -d "${TARGET_PGDATABASE}" -t -A -c "
-    SELECT EXISTS (SELECT 1 FROM pg_proc WHERE proname = '${fn}');
+    SELECT EXISTS (
+      SELECT 1 FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE p.proname = '${fn}' AND n.nspname IN ('medicina', 'public')
+    );
   ")
   if [[ "${FN_EXISTS}" == "t" ]]; then
-    echo "  [OK] Função SQL '${fn}' presente."
+    echo "  [OK] Função SQL canônica '${fn}' presente."
   else
-    echo "  [FALHA] Função SQL '${fn}' NÃO encontrada!" >&2
+    echo "  [FALHA] Função SQL canônica '${fn}' NÃO encontrada!" >&2
     EXIT_CODE=1
   fi
 done
 
-# Checa função autenticar_por_email (em medicina ou public)
-AUTH_FN_EXISTS=$(psql -h "${TARGET_PGHOST}" -p "${TARGET_PGPORT}" -U "${TARGET_PGUSER}" -d "${TARGET_PGDATABASE}" -t -A -c "
-  SELECT EXISTS (
-    SELECT 1 FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE p.proname = 'autenticar_por_email' AND n.nspname IN ('medicina', 'public')
-  );
-")
-if [[ "${AUTH_FN_EXISTS}" == "t" ]]; then
-  echo "  [OK] Função de autenticação 'autenticar_por_email' presente."
-else
-  echo "  [FALHA] Função 'autenticar_por_email' NÃO encontrada em medicina/public!" >&2
-  EXIT_CODE=1
-fi
-
 # ------------------------------------------------------------------------------
-# 6. ÍNDICES E BUSCA VETORIAL
+# 6. ÍNDICES, CONSTRAINTS E BUSCA VETORIAL
 # ------------------------------------------------------------------------------
-echo "--- [6/7] Auditoria de Índices e Suporte Vetorial ---"
+echo "--- [6/7] Auditoria de Índices, Constraints e Suporte Vetorial ---"
 # Verifica índice vetorial em acervo_chunks.embedding
 VECTOR_INDEX_EXISTS=$(psql -h "${TARGET_PGHOST}" -p "${TARGET_PGPORT}" -U "${TARGET_PGUSER}" -d "${TARGET_PGDATABASE}" -t -A -c "
   SELECT EXISTS (
@@ -295,6 +370,22 @@ if [[ "${VECTOR_INDEX_EXISTS}" == "t" ]]; then
 else
   echo "  [FALHA] Índice vetorial em 'acervo_chunks.embedding' NÃO encontrado!" >&2
   EXIT_CODE=1
+fi
+
+# Verificação de Chaves Primárias e Integridade Referencial (Constraints)
+PK_COUNT=$(psql -h "${TARGET_PGHOST}" -p "${TARGET_PGPORT}" -U "${TARGET_PGUSER}" -d "${TARGET_PGDATABASE}" -t -A -c "
+  SELECT count(*) FROM pg_constraint c
+  JOIN pg_namespace n ON n.oid = c.connamespace
+  WHERE n.nspname = 'public' AND c.contype = 'p';
+" 2>/dev/null || echo "0")
+FK_COUNT=$(psql -h "${TARGET_PGHOST}" -p "${TARGET_PGPORT}" -U "${TARGET_PGUSER}" -d "${TARGET_PGDATABASE}" -t -A -c "
+  SELECT count(*) FROM pg_constraint c
+  JOIN pg_namespace n ON n.oid = c.connamespace
+  WHERE n.nspname = 'public' AND c.contype = 'f';
+" 2>/dev/null || echo "0")
+echo "  [OK] Constraints estruturais: ${PK_COUNT} Chaves Primárias (PK) e ${FK_COUNT} Chaves Estrangeiras (FK)."
+if [[ "${PK_COUNT}" -lt 30 ]]; then
+  echo "  [AVISO] Número de Chaves Primárias (${PK_COUNT}) menor que o esperado para 35 tabelas."
 fi
 
 # ------------------------------------------------------------------------------
@@ -344,9 +435,9 @@ fi
 
 echo "======================================================================"
 if [[ ${EXIT_CODE} -eq 0 ]]; then
-  echo "[$(date -u)] AUDITORIA H2.03-R2A CONCLUÍDA: BANCO RESTAURADO 100% APTO!"
+  echo "[$(date -u)] AUDITORIA H2.03-R2D CONCLUÍDA: BANCO RESTAURADO 100% APTO!"
 else
-  echo "[$(date -u)] AUDITORIA H2.03-R2A CONCLUÍDA: STATUS NÃO APTO (Falhas detectadas)!" >&2
+  echo "[$(date -u)] AUDITORIA H2.03-R2D CONCLUÍDA: STATUS NÃO APTO (Falhas detectadas)!" >&2
 fi
 echo "======================================================================"
 

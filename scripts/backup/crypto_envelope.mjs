@@ -33,6 +33,7 @@ import {
   existsSync,
   fstatSync,
   openSync,
+  readFileSync,
   readSync,
   unlinkSync,
 } from 'node:fs';
@@ -49,11 +50,13 @@ const KEY_LENGTH = 32; // 256 bits
 
 function printUsage() {
   console.error(`Uso:
-  node crypto_envelope.mjs encrypt <in_file> <out_file>
-  node crypto_envelope.mjs decrypt <in_file> <out_file>
+  node crypto_envelope.mjs encrypt <in_file> <out_file> [--key-stdin | --key-fd=<fd>]
+  node crypto_envelope.mjs decrypt <in_file> <out_file> [--key-stdin | --key-fd=<fd>]
 
-Variáveis de Ambiente:
-  BACKUP_ENCRYPTION_KEY  Chave / senha mestra para cifragem e decifragem (obrigatória).
+Opções de Chave (em ordem de prioridade):
+  --key-stdin             Lê a chave mestra via standard input (stdin / fd 0).
+  --key-fd=<n>            Lê a chave mestra a partir do descritor de arquivo <n>.
+  BACKUP_ENCRYPTION_KEY   Variável de ambiente com a chave mestra (fallback para compatibilidade).
 `);
 }
 
@@ -227,28 +230,61 @@ export async function decryptFile(inFile, outFile, passphrase) {
 // Ponto de Entrada CLI
 // -----------------------------------------------------------------------------
 async function main() {
-  const [mode, inFile, outFile] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const flags = args.filter((a) => a.startsWith('--'));
+  const positional = args.filter((a) => !a.startsWith('--'));
+
+  const [mode, inFile, outFile] = positional;
 
   if (!mode || !inFile || !outFile || (mode !== 'encrypt' && mode !== 'decrypt')) {
     printUsage();
     process.exit(1);
   }
 
-  const passphrase = process.env.BACKUP_ENCRYPTION_KEY;
-  if (!passphrase || passphrase.trim().length === 0) {
-    console.error('ERRO: Variável de ambiente BACKUP_ENCRYPTION_KEY não definida!');
+  let passphrase = null;
+
+  const keyFdFlag = flags.find((a) => a.startsWith('--key-fd='));
+  const useKeyStdin = flags.includes('--key-stdin');
+
+  if (keyFdFlag) {
+    try {
+      const fd = parseInt(keyFdFlag.split('=')[1], 10);
+      passphrase = readFileSync(fd, 'utf8').replace(/[\r\n]+$/, '');
+    } catch (err) {
+      console.error(`ERRO: Falha ao ler chave mestra via descritor de arquivo (${keyFdFlag}): ${err.message}`);
+      process.exit(1);
+    }
+  } else if (useKeyStdin) {
+    try {
+      passphrase = readFileSync(0, 'utf8').replace(/[\r\n]+$/, '');
+    } catch (err) {
+      console.error(`ERRO: Falha ao ler chave mestra via stdin (--key-stdin): ${err.message}`);
+      process.exit(1);
+    }
+  } else if (process.env.BACKUP_ENCRYPTION_KEY && process.env.BACKUP_ENCRYPTION_KEY.trim().length > 0) {
+    passphrase = process.env.BACKUP_ENCRYPTION_KEY.trim();
+  } else if (!process.stdin.isTTY) {
+    try {
+      passphrase = readFileSync(0, 'utf8').replace(/[\r\n]+$/, '');
+    } catch {}
+  }
+
+  if (!passphrase || passphrase.length === 0) {
+    console.error('ERRO: Chave de criptografia não fornecida via stdin (--key-stdin), descritor de arquivo (--key-fd) ou variável BACKUP_ENCRYPTION_KEY!');
     process.exit(1);
   }
 
   try {
     if (mode === 'encrypt') {
-      await encryptFile(inFile, outFile, passphrase.trim());
+      await encryptFile(inFile, outFile, passphrase);
     } else {
-      await decryptFile(inFile, outFile, passphrase.trim());
+      await decryptFile(inFile, outFile, passphrase);
     }
   } catch (err) {
     console.error(`ERRO CRÍTICO NA OPERAÇÃO CRIPTOGRÁFICA: ${err.message}`);
     process.exit(2);
+  } finally {
+    passphrase = ''; // purga imediata da memória
   }
 }
 

@@ -189,8 +189,8 @@ CRYPTO_SCRIPT="$(dirname "$0")/crypto_envelope.mjs"
 if [[ "${ENCRYPTION_METHOD}" == "aead" || ("${ENCRYPTION_METHOD}" == "openssl" && -f "${CRYPTO_SCRIPT}" && $(command -v node &>/dev/null; echo $?) -eq 0) ]]; then
   echo "[$(date -u)] Cifrando dump e globais com Criptografia Autenticada (AES-256-GCM AEAD com Tag 128-bit)..."
 
-  node "${CRYPTO_SCRIPT}" encrypt "${DUMP_FILE}" "${DUMP_FILE}.enc"
-  node "${CRYPTO_SCRIPT}" encrypt "${GLOBALS_FILE}" "${GLOBALS_FILE}.enc"
+  printf '%s' "${BACKUP_ENCRYPTION_KEY}" | node "${CRYPTO_SCRIPT}" encrypt "${DUMP_FILE}" "${DUMP_FILE}.enc" --key-stdin
+  printf '%s' "${BACKUP_ENCRYPTION_KEY}" | node "${CRYPTO_SCRIPT}" encrypt "${GLOBALS_FILE}" "${GLOBALS_FILE}.enc" --key-stdin
 
   sha256sum "${DUMP_FILE}.enc" > "${DUMP_FILE}.enc.sha256"
   sha256sum "${GLOBALS_FILE}.enc" > "${GLOBALS_FILE}.enc.sha256"

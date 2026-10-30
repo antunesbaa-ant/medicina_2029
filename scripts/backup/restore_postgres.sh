@@ -55,6 +55,7 @@ fi
 TMP_RESTORE_DIR=$(mktemp -d -t medicina2029_restore_XXXXXX)
 chmod 700 "${TMP_RESTORE_DIR}"
 cleanup() {
+  unset BACKUP_ENCRYPTION_KEY 2>/dev/null || true
   if [[ -d "${TMP_RESTORE_DIR}" ]]; then
     rm -rf "${TMP_RESTORE_DIR}"
   fi
@@ -79,14 +80,18 @@ RAW_DUMP=$(find "${SOURCE_DIR}" -maxdepth 1 -name "*.dump" | head -n 1 || true)
 RAW_MANIFEST=$(find "${SOURCE_DIR}" -maxdepth 1 -name "*_manifest.json" | head -n 1 || true)
 ENC_MANIFEST=$(find "${SOURCE_DIR}" -maxdepth 1 -name "*_manifest.json.enc" | head -n 1 || true)
 
-# Se necessário, solicita senha interativa sem eco
+# Se necessário, solicita senha interativa sem eco ou lê de stdin redirecionado
 if [[ (-n "${ENC_DUMP}" || -n "${ENC_MANIFEST}") && -z "${BACKUP_ENCRYPTION_KEY}" ]]; then
   if [[ -t 0 ]]; then
     echo -n "🔑 Digite a chave mestra de descriptografia do backup: "
     read -r -s BACKUP_ENCRYPTION_KEY
     echo ""
   else
-    echo "ERRO CRÍTICO: BACKUP_ENCRYPTION_KEY não definida no ambiente para execução não-interativa." >&2
+    read -r BACKUP_ENCRYPTION_KEY || true
+  fi
+
+  if [[ -z "${BACKUP_ENCRYPTION_KEY}" ]]; then
+    echo "ERRO CRÍTICO: Chave mestra de descriptografia não informada (nem interativamente, nem via pipe stdin, nem no ambiente)." >&2
     exit 1
   fi
 fi
@@ -99,7 +104,10 @@ if [[ -n "${RAW_MANIFEST}" && -f "${RAW_MANIFEST}" ]]; then
 elif [[ -n "${ENC_MANIFEST}" && -f "${ENC_MANIFEST}" ]]; then
   echo "[$(date -u)] Decifrando manifesto criptografado (${ENC_MANIFEST})..."
   CRYPTO_SCRIPT="$(dirname "$0")/crypto_envelope.mjs"
-  node "${CRYPTO_SCRIPT}" decrypt "${ENC_MANIFEST}" "${MANIFEST_FILE}"
+  if ! printf '%s' "${BACKUP_ENCRYPTION_KEY}" | node "${CRYPTO_SCRIPT}" decrypt "${ENC_MANIFEST}" "${MANIFEST_FILE}" --key-stdin; then
+    echo "ERRO CRÍTICO: Falha na descriptografia do manifesto. Operação abortada sumariamente." >&2
+    exit 2
+  fi
 else
   echo "ERRO CRÍTICO: Arquivo de manifesto (*_manifest.json ou *_manifest.json.enc) não encontrado em ${SOURCE_DIR}." >&2
   exit 1
@@ -121,13 +129,19 @@ if [[ -n "${ENC_DUMP}" && -f "${ENC_DUMP}" ]]; then
     CRYPTO_SCRIPT="$(dirname "$0")/crypto_envelope.mjs"
     if [[ -f "${CRYPTO_SCRIPT}" ]] && command -v node &>/dev/null; then
       echo "[$(date -u)] Decifrando dump com utilitário criptográfico (AES-256-GCM AEAD / fallback retroativo CBC)..."
-      node "${CRYPTO_SCRIPT}" decrypt "${ENC_DUMP}" "${DUMP_TO_RESTORE}"
+      if ! printf '%s' "${BACKUP_ENCRYPTION_KEY}" | node "${CRYPTO_SCRIPT}" decrypt "${ENC_DUMP}" "${DUMP_TO_RESTORE}" --key-stdin; then
+        echo "ERRO CRÍTICO: Falha na descriptografia do dump. Operação abortada sumariamente." >&2
+        exit 2
+      fi
     else
       echo "[$(date -u)] Decifrando dump com OpenSSL (AES-256-CBC legado)..."
-      openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
+      if ! printf '%s' "${BACKUP_ENCRYPTION_KEY}" | openssl enc -d -aes-256-cbc -pbkdf2 -iter 100000 \
         -in "${ENC_DUMP}" \
         -out "${DUMP_TO_RESTORE}" \
-        -pass "env:BACKUP_ENCRYPTION_KEY"
+        -pass stdin; then
+        echo "ERRO CRÍTICO: Falha na descriptografia com OpenSSL. Operação abortada sumariamente." >&2
+        exit 2
+      fi
     fi
   elif [[ "${ENC_DUMP}" == *.gpg ]]; then
     if [[ -z "${BACKUP_ENCRYPTION_KEY}" ]]; then
@@ -135,9 +149,12 @@ if [[ -n "${ENC_DUMP}" && -f "${ENC_DUMP}" ]]; then
       exit 1
     fi
     echo "[$(date -u)] Decifrando dump com GPG..."
-    gpg --batch --yes --decrypt \
-      --passphrase "${BACKUP_ENCRYPTION_KEY}" \
-      --output "${DUMP_TO_RESTORE}" "${ENC_DUMP}"
+    if ! printf '%s' "${BACKUP_ENCRYPTION_KEY}" | gpg --batch --yes --decrypt \
+      --passphrase-fd 0 \
+      --output "${DUMP_TO_RESTORE}" "${ENC_DUMP}"; then
+      echo "ERRO CRÍTICO: Falha na descriptografia com GPG. Operação abortada sumariamente." >&2
+      exit 2
+    fi
   fi
 elif [[ -n "${RAW_DUMP}" && -f "${RAW_DUMP}" ]]; then
   echo "[$(date -u)] Arquivo de dump em formato claro identificado: ${RAW_DUMP}"
@@ -146,6 +163,10 @@ else
   echo "ERRO CRÍTICO: Nenhum arquivo de dump (.dump, .dump.enc ou .dump.gpg) encontrado!" >&2
   exit 1
 fi
+
+# PURGA DA CHAVE: A chave foi transmitida estritamente via descritor IPC anônimo (stdin).
+# Eliminamos a chave imediatamente da memória do processo shell antes de qualquer validação ou conexão.
+unset BACKUP_ENCRYPTION_KEY
 
 # ------------------------------------------------------------------------------
 # 3. VALIDAÇÃO DE INTEGRIDADE SHA-256 E TABELA DE CONTEÚDOS (TOC)
