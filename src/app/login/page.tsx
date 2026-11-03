@@ -32,8 +32,12 @@ function LoginForm() {
             : (res?.error || 'E-mail ou senha incorretos.')
         );
       } else {
-        // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-        window.location.href = '/';
+        const callbackUrl = searchParams.get('callbackUrl');
+        const targetUrl =
+          callbackUrl && callbackUrl.startsWith('/') && !callbackUrl.startsWith('//')
+            ? callbackUrl
+            : '/';
+        window.location.href = targetUrl;
       }
     } catch {
       setErro('Ocorreu um erro ao tentar fazer login. Tente novamente.');
