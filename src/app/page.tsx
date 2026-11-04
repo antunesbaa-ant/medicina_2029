@@ -11,7 +11,11 @@ export default async function Home() {
   let perfil;
   try {
     perfil = await requireAuthenticatedProfile();
-  } catch {
+  } catch (error) {
+    console.error(
+      '[Home] Usuário não autenticado ou perfil inacessível. Redirecionando para /login:',
+      error instanceof Error ? error.message : String(error)
+    );
     redirect('/login');
   }
 

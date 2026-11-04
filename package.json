@@ -15,7 +15,9 @@
     "db:migrate:staging": "node scripts/db/migrate-staging.mjs",
     "db:seed": "npx tsx src/db/seed.ts",
     "db:seed:staging": "npx tsx src/db/seed-staging.ts",
-    "worker:ondemand": "node scripts/worker/run-on-demand.mjs"
+    "worker:ondemand": "node scripts/worker/run-on-demand.mjs",
+    "config:staging:web": "node scripts/db/configure-staging-web-env.mjs",
+    "dev:staging": "node scripts/db/launch-staging-web.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1101.0",

@@ -47,6 +47,11 @@ function sessionProfileRole(session: Session | null): Papel | null {
   return user?.role === 'estudante' || user?.role === 'responsavel' ? user.role : null;
 }
 
+function sanitizeLogMessage(msg: unknown): string {
+  const text = msg instanceof Error ? msg.message : String(msg);
+  return text.replace(/:[^:@\s]+@/g, ':***@');
+}
+
 export async function requireAuthenticatedProfile(): Promise<AuthorizedProfile> {
   let session: Session | null;
 
@@ -95,8 +100,12 @@ export async function requireAuthenticatedProfile(): Promise<AuthorizedProfile> 
             .limit(1);
           return rlsRow;
         });
-      } catch {
-        // Fallback defensivo
+      } catch (txError) {
+        // Fallback defensivo com rastreabilidade nos logs do servidor (sem expor segredos)
+        console.error(
+          '[authorization] Falha no fallback transacional RLS:',
+          sanitizeLogMessage(txError)
+        );
       }
     }
 
@@ -109,6 +118,11 @@ export async function requireAuthenticatedProfile(): Promise<AuthorizedProfile> 
     if (error instanceof AuthorizationError) {
       throw error;
     }
+    // Registra falhas reais de infraestrutura de banco no console do servidor (sem expor para o cliente)
+    console.error(
+      '[authorization] Erro de banco de dados ao obter perfil autenticado:',
+      sanitizeLogMessage(error)
+    );
     throw new AuthorizationError('UNAUTHENTICATED');
   }
 }
