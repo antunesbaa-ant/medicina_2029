@@ -47,50 +47,54 @@ export async function obterCicloAtivo(): Promise<CicloAtivoData | null> {
   const estudante = await requireStudentScope();
 
   try {
-    // 1. Busca o ciclo ativo persistido no PostgreSQL (sem fallback para mocks)
-    const [cicloAtivo] = await db
-      .select()
-      .from(ciclos)
-      .where(and(eq(ciclos.ativo, true), eq(ciclos.estudantePerfilId, estudante.id)))
-      .limit(1);
+    return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, estudante.id, estudante.papel);
 
-    if (!cicloAtivo) {
-      return null;
-    }
+      // 1. Busca o ciclo ativo persistido no PostgreSQL (sem fallback para mocks)
+      const [cicloAtivo] = await tx
+        .select()
+        .from(ciclos)
+        .where(and(eq(ciclos.ativo, true), eq(ciclos.estudantePerfilId, estudante.id)))
+        .limit(1);
 
-    // 2. Busca os blocos vinculados ordenados por ordem com as disciplinas correspondentes
-    const blocos = await db
-      .select({
-        id: cicloBlocos.id,
-        cicloId: cicloBlocos.cicloId,
-        ordem: cicloBlocos.ordem,
-        disciplinaId: cicloBlocos.disciplinaId,
-        tipo: cicloBlocos.tipo,
-        estiloAlvo: cicloBlocos.estiloAlvo,
-        duracaoMin: cicloBlocos.duracaoMin,
-        disciplina: disciplinas,
-      })
-      .from(cicloBlocos)
-      .where(eq(cicloBlocos.cicloId, cicloAtivo.id))
-      .innerJoin(disciplinas, eq(cicloBlocos.disciplinaId, disciplinas.id))
-      .orderBy(asc(cicloBlocos.ordem));
+      if (!cicloAtivo) {
+        return null;
+      }
 
-    // 3. Busca o estado persistido do ciclo (proxima_ordem)
-    const [estado] = await db
-      .select()
-      .from(cicloEstado)
-      .where(eq(cicloEstado.cicloId, cicloAtivo.id))
-      .limit(1);
+      // 2. Busca os blocos vinculados ordenados por ordem com as disciplinas correspondentes
+      const blocos = await tx
+        .select({
+          id: cicloBlocos.id,
+          cicloId: cicloBlocos.cicloId,
+          ordem: cicloBlocos.ordem,
+          disciplinaId: cicloBlocos.disciplinaId,
+          tipo: cicloBlocos.tipo,
+          estiloAlvo: cicloBlocos.estiloAlvo,
+          duracaoMin: cicloBlocos.duracaoMin,
+          disciplina: disciplinas,
+        })
+        .from(cicloBlocos)
+        .where(eq(cicloBlocos.cicloId, cicloAtivo.id))
+        .innerJoin(disciplinas, eq(cicloBlocos.disciplinaId, disciplinas.id))
+        .orderBy(asc(cicloBlocos.ordem));
 
-    const ordemBruta = estado ? estado.proximaOrdem : 1;
-    const proximaOrdem =
-      blocos.length > 0 && (ordemBruta < 1 || ordemBruta > blocos.length) ? 1 : ordemBruta;
+      // 3. Busca o estado persistido do ciclo (proxima_ordem)
+      const [estado] = await tx
+        .select()
+        .from(cicloEstado)
+        .where(eq(cicloEstado.cicloId, cicloAtivo.id))
+        .limit(1);
 
-    return {
-      ciclo: cicloAtivo,
-      blocos,
-      proximaOrdem,
-    };
+      const ordemBruta = estado ? estado.proximaOrdem : 1;
+      const proximaOrdem =
+        blocos.length > 0 && (ordemBruta < 1 || ordemBruta > blocos.length) ? 1 : ordemBruta;
+
+      return {
+        ciclo: cicloAtivo,
+        blocos,
+        proximaOrdem,
+      };
+    });
   } catch (error) {
     if (error instanceof PublicOperationError) throw error;
     logOperationalFailure('ciclo.obter_ativo', 'persistence');
@@ -104,15 +108,18 @@ export async function obterCicloAtivo(): Promise<CicloAtivoData | null> {
 export async function obterTopicosPorDisciplina(
   disciplinaId: string
 ): Promise<Array<typeof topicos.$inferSelect>> {
-  await requireAuthenticatedProfile();
+  const perfil = await requireAuthenticatedProfile();
   const disciplinaIdValido = v.uuid('ID da disciplina').parse(disciplinaId);
 
   try {
-    return await db
-      .select()
-      .from(topicos)
-      .where(eq(topicos.disciplinaId, disciplinaIdValido))
-      .orderBy(asc(topicos.ordem));
+    return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
+      return await tx
+        .select()
+        .from(topicos)
+        .where(eq(topicos.disciplinaId, disciplinaIdValido))
+        .orderBy(asc(topicos.ordem));
+    });
   } catch (error) {
     if (error instanceof PublicOperationError) throw error;
     logOperationalFailure('ciclo.topicos_por_disciplina', 'persistence');
@@ -127,29 +134,32 @@ export async function obterProgressoSemanalCiclo(): Promise<ProgressoSemanalCicl
   const estudante = await requireStudentScope();
 
   try {
-    const seteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, estudante.id, estudante.papel);
+      const seteDiasAtras = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    const sessoesConcluidasRecentes = await db
-      .select({ id: sessoes.id })
-      .from(sessoes)
-      .where(
-        and(
-          eq(sessoes.perfilId, estudante.id),
-          eq(sessoes.concluida, true),
-          gte(sessoes.encerradaEm, seteDiasAtras)
-        )
-      );
+      const sessoesConcluidasRecentes = await tx
+        .select({ id: sessoes.id })
+        .from(sessoes)
+        .where(
+          and(
+            eq(sessoes.perfilId, estudante.id),
+            eq(sessoes.concluida, true),
+            gte(sessoes.encerradaEm, seteDiasAtras)
+          )
+        );
 
-    const [sessaoAberta] = await db
-      .select({ id: sessoes.id })
-      .from(sessoes)
-      .where(and(eq(sessoes.perfilId, estudante.id), isNull(sessoes.encerradaEm)))
-      .limit(1);
+      const [sessaoAberta] = await tx
+        .select({ id: sessoes.id })
+        .from(sessoes)
+        .where(and(eq(sessoes.perfilId, estudante.id), isNull(sessoes.encerradaEm)))
+        .limit(1);
 
-    return {
-      concluidosSemana: sessoesConcluidasRecentes.length,
-      sessaoAbertaId: sessaoAberta?.id ?? null,
-    };
+      return {
+        concluidosSemana: sessoesConcluidasRecentes.length,
+        sessaoAbertaId: sessaoAberta?.id ?? null,
+      };
+    });
   } catch (error) {
     if (error instanceof PublicOperationError) throw error;
     logOperationalFailure('ciclo.progresso_semanal', 'persistence');
