@@ -23,6 +23,13 @@ export const RESPONSAVEL_USER: MockSessionUser = {
   role: 'responsavel',
 };
 
+export const CARLOS_USER: MockSessionUser = {
+  id: '10000000-0000-4000-8000-000000000003',
+  name: 'Carlos Estudante Sintetico',
+  email: 'carlos@medicina2029.staging',
+  role: 'estudante',
+};
+
 export async function createSessionCookie(user: MockSessionUser): Promise<string> {
   return await encode({
     token: {

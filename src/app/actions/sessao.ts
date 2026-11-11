@@ -91,11 +91,15 @@ export async function iniciarSessao(
           .limit(1);
 
         const proximaOrdemAtual = blocoSessaoAberta?.proximaOrdem ?? 1;
+        // Na fila circular de estudos, se a sessão aberta for de um bloco distinto da atividade
+        // atualmente apontada pelo ciclo, ela é classificada como órfã/superada (seja em ordem linear
+        // ou na transição circular entre a última e a primeira posição).
         const sessaoAbertaEhDeBlocoAnterior =
-          blocoSessaoAberta && blocoSessaoAberta.ordem < proximaOrdemAtual;
+          blocoSessaoAberta && blocoSessaoAberta.ordem !== proximaOrdemAtual;
 
         if (sessaoAbertaEhDeBlocoAnterior) {
-          // Auto-encerra a sessão órfã do bloco anterior como incompleta para desimpedir a nova atividade
+          // Auto-encerra a sessão órfã do bloco anterior como incompleta para desimpedir a nova atividade.
+          // Aplica predicados estritos para garantir que nenhuma linha de outro perfil ou já concluída seja alterada.
           await tx
             .update(sessoes)
             .set({
@@ -103,7 +107,14 @@ export async function iniciarSessao(
               concluida: false,
               notaLivre: sql`COALESCE(${sessoes.notaLivre}, '') || ' [Encerrada automaticamente: bloco anterior superado pelo ciclo]'`,
             })
-            .where(eq(sessoes.id, sessaoAberta.id));
+            .where(
+              and(
+                eq(sessoes.id, sessaoAberta.id),
+                eq(sessoes.perfilId, perfil.id),
+                isNull(sessoes.encerradaEm),
+                eq(sessoes.concluida, false)
+              )
+            );
         } else {
           throw new PublicOperationError(
             'CONFLICT',
@@ -160,7 +171,7 @@ export async function iniciarSessao(
 
         const proximaOrdem = estadoCicloBloco?.proximaOrdem ?? 1;
 
-        if (vinculoBlocoTopico.blocoOrdem < proximaOrdem) {
+        if (vinculoBlocoTopico.blocoOrdem !== proximaOrdem) {
           const [sessaoJaConcluida] = await tx
             .select({ id: sessoes.id })
             .from(sessoes)
@@ -455,8 +466,8 @@ export async function obterEstadoSessaoCronometro(opcoes?: {
         const pediuOutroBloco =
           Boolean(validado.cicloBlocoId) && validado.cicloBlocoId !== aberta.bloco.id;
 
-        // B) Se a sessão aberta pertence a um bloco que já foi superado pelo ponteiro do ciclo:
-        const blocoJaSuperado = aberta.bloco.ordem < proximaOrdem;
+        // B) Se a sessão aberta pertence a um bloco que não coincide com a atividade atual do ciclo:
+        const blocoJaSuperado = aberta.bloco.ordem !== proximaOrdem;
 
         // Apenas retorna 'em_andamento' se a sessão for compatível com a atividade atual
         if (!pediuOutroBloco && !blocoJaSuperado) {
@@ -581,11 +592,11 @@ export async function obterEstadoSessaoCronometro(opcoes?: {
       const blocoAtualDoCiclo =
         blocos.find((b) => b.bloco.ordem === proximaOrdemCiclo) ?? blocos[0];
 
-      // Se o bloco solicitado for anterior ao ponteiro atual do ciclo, redireciona a sugestão
-      // para a atividade corrente do ciclo (proximaOrdemCiclo), impedindo que links antigos
-      // tentem reiniciar blocos já concluídos.
+      // Na fila sequencial, se o bloco solicitado for diferente do ponteiro atual do ciclo
+      // (ex.: link obsoleto de bloco já superado no ciclo linear ou circular),
+      // redireciona com segurança a sugestão para a atividade corrente (proximaOrdemCiclo).
       const itemBloco =
-        blocoSolicitado && blocoSolicitado.bloco.ordem >= proximaOrdemCiclo
+        blocoSolicitado && blocoSolicitado.bloco.ordem === proximaOrdemCiclo
           ? blocoSolicitado
           : blocoAtualDoCiclo;
 
