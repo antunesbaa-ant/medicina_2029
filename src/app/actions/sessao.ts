@@ -78,10 +78,38 @@ export async function iniciarSessao(
           return sessaoAberta.id;
         }
 
-        throw new PublicOperationError(
-          'CONFLICT',
-          'Já existe outra sessão de estudo em andamento para este perfil. Retome ou encerre a sessão aberta antes de iniciar outra.'
-        );
+        // Verifica se a sessão aberta anterior é um resíduo órfão de um bloco já superado pelo ciclo
+        const [blocoSessaoAberta] = await tx
+          .select({
+            blocoId: cicloBlocos.id,
+            ordem: cicloBlocos.ordem,
+            proximaOrdem: cicloEstado.proximaOrdem,
+          })
+          .from(cicloBlocos)
+          .leftJoin(cicloEstado, eq(cicloBlocos.cicloId, cicloEstado.cicloId))
+          .where(eq(cicloBlocos.id, sessaoAberta.cicloBlocoId))
+          .limit(1);
+
+        const proximaOrdemAtual = blocoSessaoAberta?.proximaOrdem ?? 1;
+        const sessaoAbertaEhDeBlocoAnterior =
+          blocoSessaoAberta && blocoSessaoAberta.ordem < proximaOrdemAtual;
+
+        if (sessaoAbertaEhDeBlocoAnterior) {
+          // Auto-encerra a sessão órfã do bloco anterior como incompleta para desimpedir a nova atividade
+          await tx
+            .update(sessoes)
+            .set({
+              encerradaEm: new Date(),
+              concluida: false,
+              notaLivre: sql`COALESCE(${sessoes.notaLivre}, '') || ' [Encerrada automaticamente: bloco anterior superado pelo ciclo]'`,
+            })
+            .where(eq(sessoes.id, sessaoAberta.id));
+        } else {
+          throw new PublicOperationError(
+            'CONFLICT',
+            'Já existe outra sessão de estudo em andamento para este perfil. Retome ou encerre a sessão aberta antes de iniciar outra.'
+          );
+        }
       }
 
       // Integridade relacional: verifica que o bloco pertence a ciclo do perfil
@@ -89,6 +117,9 @@ export async function iniciarSessao(
       const [vinculoBlocoTopico] = await tx
         .select({
           blocoId: cicloBlocos.id,
+          cicloId: ciclos.id,
+          blocoOrdem: cicloBlocos.ordem,
+          cicloAtivo: ciclos.ativo,
           estudantePerfilId: ciclos.estudantePerfilId,
           blocoDisciplinaId: cicloBlocos.disciplinaId,
           topicoDisciplinaId: topicos.disciplinaId,
@@ -117,6 +148,38 @@ export async function iniciarSessao(
           'NOT_FOUND',
           'Bloco do ciclo ou tópico não encontrado ou acesso não permitido.'
         );
+      }
+
+      // Valida se o bloco requisitado já foi concluído anteriormente no ciclo ativo
+      if (vinculoBlocoTopico.cicloAtivo) {
+        const [estadoCicloBloco] = await tx
+          .select({ proximaOrdem: cicloEstado.proximaOrdem })
+          .from(cicloEstado)
+          .where(eq(cicloEstado.cicloId, vinculoBlocoTopico.cicloId))
+          .limit(1);
+
+        const proximaOrdem = estadoCicloBloco?.proximaOrdem ?? 1;
+
+        if (vinculoBlocoTopico.blocoOrdem < proximaOrdem) {
+          const [sessaoJaConcluida] = await tx
+            .select({ id: sessoes.id })
+            .from(sessoes)
+            .where(
+              and(
+                eq(sessoes.perfilId, perfil.id),
+                eq(sessoes.cicloBlocoId, validado.cicloBlocoId),
+                eq(sessoes.concluida, true)
+              )
+            )
+            .limit(1);
+
+          if (sessaoJaConcluida) {
+            throw new PublicOperationError(
+              'CONFLICT',
+              'Este bloco do ciclo já foi concluído e o ciclo avançou para a próxima atividade.'
+            );
+          }
+        }
       }
 
       const [sessaoInserida] = await tx
@@ -357,57 +420,11 @@ export async function obterEstadoSessaoCronometro(opcoes?: {
   const validado = obterEstadoSessaoCronometroInputSchema.parse(opcoes ?? {});
 
   try {
-    // 1. Verifica se existe uma sessão aberta (`encerrada_em IS NULL`) para a estudante autenticada
-    const [aberta] = await db
-      .select({
-        sessao: sessoes,
-        bloco: cicloBlocos,
-        ciclo: ciclos,
-        disciplina: disciplinas,
-        topico: topicos,
-      })
-      .from(sessoes)
-      .innerJoin(cicloBlocos, eq(sessoes.cicloBlocoId, cicloBlocos.id))
-      .innerJoin(ciclos, eq(cicloBlocos.cicloId, ciclos.id))
-      .innerJoin(disciplinas, eq(cicloBlocos.disciplinaId, disciplinas.id))
-      .innerJoin(topicos, eq(sessoes.topicoId, topicos.id))
-      .where(and(eq(sessoes.perfilId, perfil.id), isNull(sessoes.encerradaEm)))
-      .limit(1);
+    return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
 
-    if (aberta) {
-      const [estadoCiclo] = await db
-        .select({ proximaOrdem: cicloEstado.proximaOrdem })
-        .from(cicloEstado)
-        .where(eq(cicloEstado.cicloId, aberta.ciclo.id))
-        .limit(1);
-
-      return {
-        statusSessao: 'em_andamento',
-        sessao: {
-          id: aberta.sessao.id,
-          cicloBlocoId: aberta.bloco.id,
-          topicoId: aberta.topico.id,
-          disciplinaId: aberta.disciplina.id,
-          disciplinaNome: aberta.disciplina.nome,
-          topicoNome: aberta.topico.nome,
-          iniciadaEm: aberta.sessao.iniciadaEm,
-          encerradaEm: null,
-          etapaAtingida: (aberta.sessao.etapaAtingida ?? 'revisao') as EtapaPedagogicaSessao,
-          segundosEfetivos: aberta.sessao.segundosEfetivos ?? 0,
-          segundosPausa: aberta.sessao.segundosPausa ?? 0,
-          concluida: Boolean(aberta.sessao.concluida),
-          notaLivre: aberta.sessao.notaLivre ?? null,
-        },
-        blocoSugerido: null,
-        proximaOrdemCiclo: estadoCiclo?.proximaOrdem ?? aberta.bloco.ordem,
-        serverTimestampMs: Date.now(),
-      };
-    }
-
-    // 2. Se não há sessão aberta, mas o cliente enviou um `sessaoId` do cache local,
-    //    verifica se essa sessão já foi encerrada no banco (estado local desatualizado).
-    if (validado.sessaoId) {
-      const [encerrada] = await db
+      // 1. Verifica se existe uma sessão aberta (`encerrada_em IS NULL`) para a estudante autenticada
+      const [aberta] = await tx
         .select({
           sessao: sessoes,
           bloco: cicloBlocos,
@@ -420,120 +437,192 @@ export async function obterEstadoSessaoCronometro(opcoes?: {
         .innerJoin(ciclos, eq(cicloBlocos.cicloId, ciclos.id))
         .innerJoin(disciplinas, eq(cicloBlocos.disciplinaId, disciplinas.id))
         .innerJoin(topicos, eq(sessoes.topicoId, topicos.id))
-        .where(and(eq(sessoes.id, validado.sessaoId), eq(sessoes.perfilId, perfil.id)))
+        .where(and(eq(sessoes.perfilId, perfil.id), isNull(sessoes.encerradaEm)))
         .limit(1);
 
-      const pediuNovoBlocoExplicitamente =
-        Boolean(validado.cicloBlocoId) && validado.cicloBlocoId !== encerrada?.bloco.id;
-
-      if (encerrada && encerrada.sessao.encerradaEm && !pediuNovoBlocoExplicitamente) {
-        const [estadoCiclo] = await db
+      if (aberta) {
+        const [estadoCiclo] = await tx
           .select({ proximaOrdem: cicloEstado.proximaOrdem })
           .from(cicloEstado)
-          .where(eq(cicloEstado.cicloId, encerrada.ciclo.id))
+          .where(eq(cicloEstado.cicloId, aberta.ciclo.id))
           .limit(1);
 
+        const proximaOrdem = estadoCiclo?.proximaOrdem ?? 1;
+
+        // Critérios de Validação da Sessão Aberta Legítima:
+        // A) Se o cliente solicitou um bloco específico (validado.cicloBlocoId),
+        //    apenas aceita sessão aberta correspondente a esse bloco específico.
+        const pediuOutroBloco =
+          Boolean(validado.cicloBlocoId) && validado.cicloBlocoId !== aberta.bloco.id;
+
+        // B) Se a sessão aberta pertence a um bloco que já foi superado pelo ponteiro do ciclo:
+        const blocoJaSuperado = aberta.bloco.ordem < proximaOrdem;
+
+        // Apenas retorna 'em_andamento' se a sessão for compatível com a atividade atual
+        if (!pediuOutroBloco && !blocoJaSuperado) {
+          return {
+            statusSessao: 'em_andamento',
+            sessao: {
+              id: aberta.sessao.id,
+              cicloBlocoId: aberta.bloco.id,
+              topicoId: aberta.topico.id,
+              disciplinaId: aberta.disciplina.id,
+              disciplinaNome: aberta.disciplina.nome,
+              topicoNome: aberta.topico.nome,
+              iniciadaEm: aberta.sessao.iniciadaEm,
+              encerradaEm: null,
+              etapaAtingida: (aberta.sessao.etapaAtingida ?? 'revisao') as EtapaPedagogicaSessao,
+              segundosEfetivos: aberta.sessao.segundosEfetivos ?? 0,
+              segundosPausa: aberta.sessao.segundosPausa ?? 0,
+              concluida: Boolean(aberta.sessao.concluida),
+              notaLivre: aberta.sessao.notaLivre ?? null,
+            },
+            blocoSugerido: null,
+            proximaOrdemCiclo: proximaOrdem,
+            serverTimestampMs: Date.now(),
+          };
+        }
+      }
+
+      // 2. Se não há sessão aberta, mas o cliente enviou um `sessaoId` do cache local,
+      //    verifica se essa sessão já foi encerrada no banco (estado local desatualizado).
+      if (validado.sessaoId) {
+        const [encerrada] = await tx
+          .select({
+            sessao: sessoes,
+            bloco: cicloBlocos,
+            ciclo: ciclos,
+            disciplina: disciplinas,
+            topico: topicos,
+          })
+          .from(sessoes)
+          .innerJoin(cicloBlocos, eq(sessoes.cicloBlocoId, cicloBlocos.id))
+          .innerJoin(ciclos, eq(cicloBlocos.cicloId, ciclos.id))
+          .innerJoin(disciplinas, eq(cicloBlocos.disciplinaId, disciplinas.id))
+          .innerJoin(topicos, eq(sessoes.topicoId, topicos.id))
+          .where(and(eq(sessoes.id, validado.sessaoId), eq(sessoes.perfilId, perfil.id)))
+          .limit(1);
+
+        const pediuNovoBlocoExplicitamente =
+          Boolean(validado.cicloBlocoId) && validado.cicloBlocoId !== encerrada?.bloco.id;
+
+        if (encerrada && encerrada.sessao.encerradaEm && !pediuNovoBlocoExplicitamente) {
+          const [estadoCiclo] = await tx
+            .select({ proximaOrdem: cicloEstado.proximaOrdem })
+            .from(cicloEstado)
+            .where(eq(cicloEstado.cicloId, encerrada.ciclo.id))
+            .limit(1);
+
+          return {
+            statusSessao: 'concluida',
+            sessao: {
+              id: encerrada.sessao.id,
+              cicloBlocoId: encerrada.bloco.id,
+              topicoId: encerrada.topico.id,
+              disciplinaId: encerrada.disciplina.id,
+              disciplinaNome: encerrada.disciplina.nome,
+              topicoNome: encerrada.topico.nome,
+              iniciadaEm: encerrada.sessao.iniciadaEm,
+              encerradaEm: encerrada.sessao.encerradaEm,
+              etapaAtingida: (encerrada.sessao.etapaAtingida ?? 'revisao') as EtapaPedagogicaSessao,
+              segundosEfetivos: encerrada.sessao.segundosEfetivos ?? 0,
+              segundosPausa: encerrada.sessao.segundosPausa ?? 0,
+              concluida: Boolean(encerrada.sessao.concluida),
+              notaLivre: encerrada.sessao.notaLivre ?? null,
+            },
+            blocoSugerido: null,
+            proximaOrdemCiclo: estadoCiclo?.proximaOrdem ?? 1,
+            serverTimestampMs: Date.now(),
+          };
+        }
+      }
+
+      // 3. Nenhuma sessão em andamento: resolve o próximo bloco real do ciclo ativo no PostgreSQL
+      const [cicloAtivo] = await tx
+        .select()
+        .from(ciclos)
+        .where(and(eq(ciclos.ativo, true), eq(ciclos.estudantePerfilId, perfil.id)))
+        .limit(1);
+
+      if (!cicloAtivo) {
         return {
-          statusSessao: 'concluida',
-          sessao: {
-            id: encerrada.sessao.id,
-            cicloBlocoId: encerrada.bloco.id,
-            topicoId: encerrada.topico.id,
-            disciplinaId: encerrada.disciplina.id,
-            disciplinaNome: encerrada.disciplina.nome,
-            topicoNome: encerrada.topico.nome,
-            iniciadaEm: encerrada.sessao.iniciadaEm,
-            encerradaEm: encerrada.sessao.encerradaEm,
-            etapaAtingida: (encerrada.sessao.etapaAtingida ?? 'revisao') as EtapaPedagogicaSessao,
-            segundosEfetivos: encerrada.sessao.segundosEfetivos ?? 0,
-            segundosPausa: encerrada.sessao.segundosPausa ?? 0,
-            concluida: Boolean(encerrada.sessao.concluida),
-            notaLivre: encerrada.sessao.notaLivre ?? null,
-          },
+          statusSessao: 'nao_iniciada',
+          sessao: null,
           blocoSugerido: null,
-          proximaOrdemCiclo: estadoCiclo?.proximaOrdem ?? 1,
+          proximaOrdemCiclo: 1,
           serverTimestampMs: Date.now(),
         };
       }
-    }
 
-    // 3. Nenhuma sessão em andamento: resolve o próximo bloco real do ciclo ativo no PostgreSQL
-    const [cicloAtivo] = await db
-      .select()
-      .from(ciclos)
-      .where(and(eq(ciclos.ativo, true), eq(ciclos.estudantePerfilId, perfil.id)))
-      .limit(1);
+      const blocos = await tx
+        .select({
+          bloco: cicloBlocos,
+          disciplina: disciplinas,
+        })
+        .from(cicloBlocos)
+        .innerJoin(disciplinas, eq(cicloBlocos.disciplinaId, disciplinas.id))
+        .where(eq(cicloBlocos.cicloId, cicloAtivo.id))
+        .orderBy(asc(cicloBlocos.ordem));
 
-    if (!cicloAtivo) {
+      const [estadoCiclo] = await tx
+        .select({ proximaOrdem: cicloEstado.proximaOrdem })
+        .from(cicloEstado)
+        .where(eq(cicloEstado.cicloId, cicloAtivo.id))
+        .limit(1);
+
+      const ordemBruta = estadoCiclo?.proximaOrdem ?? 1;
+      const proximaOrdemCiclo =
+        blocos.length > 0 && (ordemBruta < 1 || ordemBruta > blocos.length) ? 1 : ordemBruta;
+
+      const blocoSolicitado = validado.cicloBlocoId
+        ? blocos.find((b) => b.bloco.id === validado.cicloBlocoId)
+        : undefined;
+
+      const blocoAtualDoCiclo =
+        blocos.find((b) => b.bloco.ordem === proximaOrdemCiclo) ?? blocos[0];
+
+      // Se o bloco solicitado for anterior ao ponteiro atual do ciclo, redireciona a sugestão
+      // para a atividade corrente do ciclo (proximaOrdemCiclo), impedindo que links antigos
+      // tentem reiniciar blocos já concluídos.
+      const itemBloco =
+        blocoSolicitado && blocoSolicitado.bloco.ordem >= proximaOrdemCiclo
+          ? blocoSolicitado
+          : blocoAtualDoCiclo;
+
+      let blocoSugerido: BlocoSugeridoServidor | null = null;
+      if (itemBloco) {
+        const topicosDisciplina = await tx
+          .select()
+          .from(topicos)
+          .where(eq(topicos.disciplinaId, itemBloco.disciplina.id))
+          .orderBy(asc(topicos.ordem));
+
+        const topicoEscolhido =
+          (validado.topicoId
+            ? topicosDisciplina.find((t) => t.id === validado.topicoId)
+            : undefined) ?? topicosDisciplina[0];
+
+        if (topicoEscolhido) {
+          blocoSugerido = {
+            blocoId: itemBloco.bloco.id,
+            cicloId: cicloAtivo.id,
+            ordem: itemBloco.bloco.ordem,
+            disciplinaId: itemBloco.disciplina.id,
+            disciplinaNome: itemBloco.disciplina.nome,
+            topicoId: topicoEscolhido.id,
+            topicoNome: topicoEscolhido.nome,
+          };
+        }
+      }
+
       return {
         statusSessao: 'nao_iniciada',
         sessao: null,
-        blocoSugerido: null,
-        proximaOrdemCiclo: 1,
+        blocoSugerido,
+        proximaOrdemCiclo,
         serverTimestampMs: Date.now(),
       };
-    }
-
-    const blocos = await db
-      .select({
-        bloco: cicloBlocos,
-        disciplina: disciplinas,
-      })
-      .from(cicloBlocos)
-      .innerJoin(disciplinas, eq(cicloBlocos.disciplinaId, disciplinas.id))
-      .where(eq(cicloBlocos.cicloId, cicloAtivo.id))
-      .orderBy(asc(cicloBlocos.ordem));
-
-    const [estadoCiclo] = await db
-      .select({ proximaOrdem: cicloEstado.proximaOrdem })
-      .from(cicloEstado)
-      .where(eq(cicloEstado.cicloId, cicloAtivo.id))
-      .limit(1);
-
-    const ordemBruta = estadoCiclo?.proximaOrdem ?? 1;
-    const proximaOrdemCiclo =
-      blocos.length > 0 && (ordemBruta < 1 || ordemBruta > blocos.length) ? 1 : ordemBruta;
-
-    const itemBloco =
-      (validado.cicloBlocoId
-        ? blocos.find((b) => b.bloco.id === validado.cicloBlocoId)
-        : undefined) ??
-      blocos.find((b) => b.bloco.ordem === proximaOrdemCiclo) ??
-      blocos[0];
-
-    let blocoSugerido: BlocoSugeridoServidor | null = null;
-    if (itemBloco) {
-      const topicosDisciplina = await db
-        .select()
-        .from(topicos)
-        .where(eq(topicos.disciplinaId, itemBloco.disciplina.id))
-        .orderBy(asc(topicos.ordem));
-
-      const topicoEscolhido =
-        (validado.topicoId
-          ? topicosDisciplina.find((t) => t.id === validado.topicoId)
-          : undefined) ?? topicosDisciplina[0];
-
-      if (topicoEscolhido) {
-        blocoSugerido = {
-          blocoId: itemBloco.bloco.id,
-          cicloId: cicloAtivo.id,
-          ordem: itemBloco.bloco.ordem,
-          disciplinaId: itemBloco.disciplina.id,
-          disciplinaNome: itemBloco.disciplina.nome,
-          topicoId: topicoEscolhido.id,
-          topicoNome: topicoEscolhido.nome,
-        };
-      }
-    }
-
-    return {
-      statusSessao: 'nao_iniciada',
-      sessao: null,
-      blocoSugerido,
-      proximaOrdemCiclo,
-      serverTimestampMs: Date.now(),
-    };
+    });
   } catch (error) {
     if (error instanceof PublicOperationError) throw error;
     logOperationalFailure('sessao.obter_estado_cronometro', 'persistence');

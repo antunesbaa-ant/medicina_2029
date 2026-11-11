@@ -1,5 +1,6 @@
 import { Suspense } from 'react';
 import CronometroPage from '../../components/CronometroPage';
+import NavBar from '../../components/NavBar';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +15,7 @@ export default function EstudarPage() {
       }>
         <CronometroPage />
       </Suspense>
+      <NavBar />
     </main>
   );
 }
