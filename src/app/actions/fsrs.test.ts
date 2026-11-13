@@ -1,17 +1,28 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FSRS, Card as FSRSCard, Rating, State } from 'ts-fsrs';
 import { obterCardsParaRevisao, registrarRevisaoCard } from './fsrs';
+import { applyRlsContext } from '../../db/rls-context';
+import { AuthorizationError, requireRole } from '../../lib/authorization';
 
 const PERFIL_1_ID = '10000000-0000-4000-8000-000000000001';
 const CARD_1_ID = '50000000-0000-4000-8000-000000000001';
 const CARD_INEXISTENTE_ID = '50000000-0000-4000-8000-000000000099';
 const TOPICO_1_ID = '31000000-0000-4000-8000-000000000001';
 
-vi.mock('../../lib/authorization', () => ({
-  requireRole: vi.fn().mockResolvedValue({
-    id: '10000000-0000-4000-8000-000000000001',
-    papel: 'estudante',
-  }),
+vi.mock('../../lib/authorization', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/authorization')>();
+  return {
+    ...actual,
+    requireRole: vi.fn().mockResolvedValue({
+      id: '10000000-0000-4000-8000-000000000001',
+      papel: 'estudante',
+    }),
+  };
+});
+
+vi.mock('../../db/rls-context', () => ({
+  applyRlsContext: vi.fn().mockResolvedValue(undefined),
+  isRlsEnforced: vi.fn().mockReturnValue(true),
 }));
 
 const dbDouble = vi.hoisted(() => {
@@ -52,6 +63,24 @@ describe('FSRS Spaced Repetition Tests', () => {
     dbDouble.queues.select.length = 0;
     dbDouble.queues.update.length = 0;
     dbDouble.queues.insert.length = 0;
+  });
+
+  it('executa a consulta dentro de db.transaction e invoca applyRlsContext com o perfil do estudante', async () => {
+    dbDouble.queues.select.push([]);
+    const res = await obterCardsParaRevisao();
+
+    expect(res).toEqual([]);
+    expect(dbDouble.db.transaction).toHaveBeenCalledOnce();
+    expect(applyRlsContext).toHaveBeenCalledWith(
+      expect.anything(),
+      PERFIL_1_ID,
+      'estudante'
+    );
+  });
+
+  it('propaga AuthorizationError de requireRole em obterCardsParaRevisao sem mascarar como PERSISTENCE_ERROR', async () => {
+    vi.mocked(requireRole).mockRejectedValueOnce(new AuthorizationError('FORBIDDEN'));
+    await expect(obterCardsParaRevisao()).rejects.toThrow(AuthorizationError);
   });
 
   it('diferencia ausência real de cards de falha de consulta', async () => {

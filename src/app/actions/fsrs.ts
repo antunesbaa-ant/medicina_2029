@@ -5,7 +5,7 @@ import { cards, cardRevisoes, topicos, disciplinas } from '../../db/schema';
 import { eq, and, lte, desc } from 'drizzle-orm';
 import { FSRS, Card as FSRSCard, State, Rating } from 'ts-fsrs';
 import { obterEstadoFSRS, obterRatingFSRS } from '../../lib/studysystem';
-import { requireRole } from '../../lib/authorization';
+import { requireRole, AuthorizationError } from '../../lib/authorization';
 import {
   PublicOperationError,
   logOperationalFailure,
@@ -16,43 +16,48 @@ import { applyRlsContext } from '../../db/rls-context';
 
 // 1. Obter Cards Due (Vencidos) do Estudante
 export async function obterCardsParaRevisao() {
-  const perfil = await requireRole('estudante');
-
   try {
-    const list = await db
-      .select({
-        id: cards.id,
-        frente: cards.frente,
-        verso: cards.verso,
-        state: cards.state,
-        stability: cards.stability,
-        difficulty: cards.difficulty,
-        elapsedDays: cards.elapsedDays,
-        scheduledDays: cards.scheduledDays,
-        reps: cards.reps,
-        lapses: cards.lapses,
-        due: cards.due,
-        lastReview: cards.lastReview,
-        topicoId: cards.topicoId,
-        topicoNome: topicos.nome,
-        disciplinaNome: disciplinas.nome,
-        corHex: disciplinas.corHex
-      })
-      .from(cards)
-      .innerJoin(topicos, eq(cards.topicoId, topicos.id))
-      .innerJoin(disciplinas, eq(topicos.disciplinaId, disciplinas.id))
-      .where(
-        and(
-          eq(cards.perfilId, perfil.id),
-          eq(cards.status, 'aprovado'),
-          eq(cards.suspenso, false),
-          lte(cards.due, new Date())
-        )
-      )
-      .orderBy(cards.due);
+    const perfil = await requireRole('estudante');
 
-    return list;
+    return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
+
+      const list = await tx
+        .select({
+          id: cards.id,
+          frente: cards.frente,
+          verso: cards.verso,
+          state: cards.state,
+          stability: cards.stability,
+          difficulty: cards.difficulty,
+          elapsedDays: cards.elapsedDays,
+          scheduledDays: cards.scheduledDays,
+          reps: cards.reps,
+          lapses: cards.lapses,
+          due: cards.due,
+          lastReview: cards.lastReview,
+          topicoId: cards.topicoId,
+          topicoNome: topicos.nome,
+          disciplinaNome: disciplinas.nome,
+          corHex: disciplinas.corHex,
+        })
+        .from(cards)
+        .innerJoin(topicos, eq(cards.topicoId, topicos.id))
+        .innerJoin(disciplinas, eq(topicos.disciplinaId, disciplinas.id))
+        .where(
+          and(
+            eq(cards.perfilId, perfil.id),
+            eq(cards.status, 'aprovado'),
+            eq(cards.suspenso, false),
+            lte(cards.due, new Date())
+          )
+        )
+        .orderBy(cards.due);
+
+      return list;
+    });
   } catch (error) {
+    if (error instanceof AuthorizationError) throw error;
     if (error instanceof PublicOperationError) throw error;
     logOperationalFailure('fsrs.list_due', 'persistence');
     throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível carregar os cards para revisão.');
@@ -228,6 +233,7 @@ export async function registrarRevisaoCard(
       };
     });
   } catch (error) {
+    if (error instanceof AuthorizationError) throw error;
     if (error instanceof PublicOperationError) {
       return { sucesso: false, code: error.code, mensagem: error.message };
     }
