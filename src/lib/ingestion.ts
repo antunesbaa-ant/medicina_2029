@@ -437,14 +437,23 @@ export async function buscaHibridaAcervo(
 
   let linhas: LinhaBuscaRaw[];
   try {
-    if (typeof db.transaction === 'function' && opcoes?.perfilId && opcoes?.papel) {
+    if (typeof db.transaction === 'function') {
       linhas = await db.transaction(async (tx) => {
+        if (opcoes?.perfilId && opcoes?.papel) {
+          try {
+            await tx.execute(
+              sql`SELECT medicina.set_context(${opcoes.perfilId}::uuid, ${opcoes.papel}::text);`
+            );
+          } catch {
+            // Em ambientes sem a função medicina.set_context instalada, segue defensivamente
+          }
+        }
         try {
           await tx.execute(
-            sql`SELECT medicina.set_context(${opcoes.perfilId}::uuid, ${opcoes.papel}::text);`
+            sql`SET LOCAL search_path = public, extensions, medicina, pg_temp;`
           );
         } catch {
-          // Em ambientes sem a função medicina.set_context instalada, segue defensivamente
+          // Em ambientes sem schema extensions, segue defensivamente
         }
         return await tx
           .select({

@@ -111,4 +111,51 @@ test.describe('MEDICINA 2029 — Automação E2E da Revisão de Flashcards FSRS'
     const hasEmptyState = await page.getByRole('heading', { name: /Tudo em Dia!/i }).isVisible();
     expect(hasGracefulError || hasEmptyState).toBe(true);
   });
+
+  test('6. Verificação visual de alto contraste efetivamente renderizado nos modos claro e escuro', async ({ page, context }) => {
+    await authenticateContext(context, ESTUDANTE_USER);
+
+    await page.goto('/revisao');
+    await expect(page.getByText('Carregando seus cartões de revisão...')).not.toBeVisible({ timeout: 10000 });
+
+    const hasActiveSession = await page.getByText(/Sessão de Repetição Espaçada/i).isVisible();
+
+    if (hasActiveSession) {
+      const flashcard = page.getByRole('button', { name: /Flashcard interativo/i });
+      const cardParagraph = flashcard.locator('p');
+
+      // Modo Claro: validação de contraste do texto da pergunta
+      const colorClaro = await cardParagraph.evaluate((el) => window.getComputedStyle(el).color);
+      // Deve ser a cor escura #1B2A33 = rgb(27, 42, 51)
+      expect(colorClaro).toBe('rgb(27, 42, 51)');
+
+      // Ativação do Modo Escuro
+      await page.evaluate(() => {
+        document.documentElement.classList.add('dark');
+        document.body.classList.add('dark');
+      });
+      // Aguarda término da transição CSS (transition-all duration-300)
+      await page.waitForTimeout(400);
+
+      // Modo Escuro: Fundo do card deve ser #24353F = rgb(36, 53, 63) via .dark .bg-white
+      const bgEscuro = await flashcard.evaluate((el) => window.getComputedStyle(el).backgroundColor);
+      expect(bgEscuro).toBe('rgb(36, 53, 63)');
+
+      // Modo Escuro: Texto da pergunta DEVE ser renderizado claro (#F5F7F8 = rgb(245, 247, 248)), e NÃO escuro
+      const colorEscuro = await cardParagraph.evaluate((el) => window.getComputedStyle(el).color);
+      expect(colorEscuro).toBe('rgb(245, 247, 248)');
+
+      // Revela o verso e valida contraste da resposta no modo escuro
+      await page.keyboard.press('Space');
+      const colorVersoEscuro = await cardParagraph.evaluate((el) => window.getComputedStyle(el).color);
+      expect(colorVersoEscuro).toBe('rgb(245, 247, 248)');
+    } else {
+      // Estado vazio no modo escuro
+      await page.evaluate(() => document.documentElement.classList.add('dark'));
+      const heading = page.getByRole('heading', { name: 'Tudo em Dia!' });
+      const headingColor = await heading.evaluate((el) => window.getComputedStyle(el).color);
+      // Deve renderizar texto claro (#E0EBF0 = rgb(224, 235, 240)), não o petróleo escuro de dia
+      expect(headingColor).toBe('rgb(224, 235, 240)');
+    }
+  });
 });
