@@ -102,14 +102,15 @@ test.describe('MEDICINA 2029 — Automação E2E da Revisão de Flashcards FSRS'
     // Aguarda o término do carregamento inicial
     await expect(page.getByText('Carregando seus cartões de revisão...')).not.toBeVisible({ timeout: 10000 });
 
-    // Garante que Carlos nunca visualiza os cards ou sessão ativa de Alice
-    await expect(page.getByText(/Sessão de Repetição Espaçada/i)).not.toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Revisões Concluídas!' })).not.toBeVisible();
+    // Garante que Carlos nunca visualiza os cards ou sessão de Alice
+    await expect(page.getByText(/Mitocôndria produz ATP via/i)).not.toBeVisible();
+    await expect(page.getByText(/Fórmula da velocidade média no MRU/i)).not.toBeVisible();
+    await expect(page.getByText(/Elementos da intervenção no ENEM/i)).not.toBeVisible();
 
-    // Carlos recebe resposta segura (estado vazio isolado ou tratamento elegante de autorização sem crash)
-    const hasGracefulError = await page.getByRole('heading', { name: 'Falha no Carregamento' }).isVisible();
-    const hasEmptyState = await page.getByRole('heading', { name: /Tudo em Dia!/i }).isVisible();
-    expect(hasGracefulError || hasEmptyState).toBe(true);
+    // Carlos visualiza exclusivamente seus próprios cartões ou tela de conclusão
+    const hasCarlosCard = await page.getByText(/Volume molar|Grandezas inversamente/i).isVisible();
+    const hasEmptyState = await page.getByRole('heading', { name: /Tudo em Dia!|Revisões Concluídas!/i }).isVisible();
+    expect(hasCarlosCard || hasEmptyState).toBe(true);
   });
 
   test('6. Verificação visual de alto contraste efetivamente renderizado nos modos claro e escuro', async ({ page, context }) => {

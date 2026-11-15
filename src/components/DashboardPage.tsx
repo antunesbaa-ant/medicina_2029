@@ -146,24 +146,30 @@ export default function DashboardPage({ dadosIniciais, embedded = false }: { dad
             )}
           </div>
 
-          <div className="space-y-4">
-            {metrics.perfilErro.distribuicao.map((err, idx) => (
-              <div key={idx} className="space-y-1.5">
-                <div className="flex justify-between text-xs font-semibold">
-                  <span className="text-gray-700">{getTipoErroLabel(err.tipo)}</span>
-                  <span className="text-[#0E3D4D]">{err.porcentagem}% ({err.contagem} erros)</span>
+          {metrics.perfilErro.distribuicao.length === 0 ? (
+            <div className="py-8 text-center text-xs text-gray-400 italic">
+              Nenhum erro registrado na janela de 90 dias. Excelente precisão nas tentativas de questões.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {metrics.perfilErro.distribuicao.map((err, idx) => (
+                <div key={idx} className="space-y-1.5">
+                  <div className="flex justify-between text-xs font-semibold">
+                    <span className="text-gray-700">{getTipoErroLabel(err.tipo)}</span>
+                    <span className="text-[#0E3D4D]">{err.porcentagem}% ({err.contagem} erros)</span>
+                  </div>
+                  <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden">
+                    <div 
+                      className={`h-full rounded-full transition-all duration-500 ${
+                        err.porcentagem > 40 ? 'bg-rose-500' : 'bg-[#17607A]'
+                      }`}
+                      style={{ width: `${err.porcentagem}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="w-full bg-gray-100 h-3 rounded-full overflow-hidden">
-                  <div 
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      err.porcentagem > 40 ? 'bg-rose-500' : 'bg-[#17607A]'
-                    }`}
-                    style={{ width: `${err.porcentagem}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           {metrics.perfilErro.alerta && (
             <div className="bg-rose-500/[0.02] border border-rose-500/25 p-3 rounded-xl text-xs text-rose-700 leading-relaxed font-medium">
@@ -193,10 +199,16 @@ export default function DashboardPage({ dadosIniciais, embedded = false }: { dad
           <section className="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex items-center justify-between">
             <div>
               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Média de Sono (14 dias)</span>
-              <h4 className="text-2xl font-bold text-[#0E3D4D] mt-1">{metrics.sono.mediaHoras}h</h4>
-              <span className="text-[10px] text-gray-400 mt-1 block">Recomendado &gt; 7.5h</span>
+              <h4 className="text-2xl font-bold text-[#0E3D4D] mt-1">
+                {metrics.sono.mediaHoras > 0 ? `${metrics.sono.mediaHoras}h` : 'Sem dados'}
+              </h4>
+              <span className="text-[10px] text-gray-400 mt-1 block">
+                {metrics.sono.mediaHoras > 0 ? 'Recomendado > 7.5h' : 'Nenhum check-in registrado'}
+              </span>
             </div>
-            {metrics.sono.alerta ? (
+            {metrics.sono.mediaHoras === 0 ? (
+              <span className="bg-gray-100 text-gray-500 text-[10px] font-bold px-2 py-1 rounded">Sem Registros</span>
+            ) : metrics.sono.alerta ? (
               <span className="bg-rose-500/10 text-rose-600 text-[10px] font-bold px-2 py-1 rounded">Sono Insuficiente</span>
             ) : (
               <span className="bg-emerald-500/10 text-emerald-600 text-[10px] font-bold px-2 py-1 rounded">Saudável</span>
@@ -244,24 +256,30 @@ export default function DashboardPage({ dadosIniciais, embedded = false }: { dad
       <section className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
         <h3 className="text-base font-bold font-['Lora'] text-[#0E3D4D] border-b pb-2">Evolução Histórica de Simulados</h3>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {metrics.simuladosEvolucao.map((sim, idx) => (
-            <div key={idx} className="bg-[#FBF8F3] p-4 rounded-xl border space-y-3">
-              <div className="flex justify-between border-b pb-1.5 text-xs font-semibold">
-                <span className="text-gray-500">Prova em {sim.data}</span>
-                <span className="text-[#0E3D4D]">Média: {sim.mediaGlobal}</span>
+        {metrics.simuladosEvolucao.length === 0 ? (
+          <div className="py-8 text-center text-xs text-gray-400 italic">
+            Nenhum simulado registrado até o momento. Conforme novos simulados forem realizados, o histórico comparativo por área aparecerá aqui.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {metrics.simuladosEvolucao.map((sim, idx) => (
+              <div key={idx} className="bg-[#FBF8F3] p-4 rounded-xl border space-y-3">
+                <div className="flex justify-between border-b pb-1.5 text-xs font-semibold">
+                  <span className="text-gray-500">Prova em {sim.data}</span>
+                  <span className="text-[#0E3D4D]">Média: {sim.mediaGlobal}</span>
+                </div>
+                <div className="space-y-1.5 text-[10px]">
+                  {sim.areas?.map((a: any, aIdx: number) => (
+                    <div key={aIdx} className="flex justify-between items-center">
+                      <span className="text-gray-600 truncate max-w-[120px]">{a.area}</span>
+                      <span className="font-bold text-gray-800">{a.acertosPct}%</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="space-y-1.5 text-[10px]">
-                {sim.areas?.map((a: any, aIdx: number) => (
-                  <div key={aIdx} className="flex justify-between items-center">
-                    <span className="text-gray-600 truncate max-w-[120px]">{a.area}</span>
-                    <span className="font-bold text-gray-800">{a.acertosPct}%</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </section>
 
     </div>

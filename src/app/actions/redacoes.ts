@@ -34,10 +34,13 @@ export interface RegistrarRepertorioInput {
 
 // 1. Obter todos os Gêneros UECE cadastrados
 export async function obterGenerosUECE() {
-  await requireRole('estudante');
+  const perfil = await requireRole('estudante');
 
   try {
-    return await db.select().from(generos);
+    return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
+      return await tx.select().from(generos);
+    });
   } catch {
     logOperationalFailure('redacoes.generos.list', 'persistence');
     throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível carregar os gêneros de redação.');
@@ -49,13 +52,14 @@ export async function obterRepertorios() {
   const perfil = await requireRole('estudante');
 
   try {
-    const list = await db
-      .select()
-      .from(repertorios)
-      .where(eq(repertorios.perfilId, perfil.id))
-      .orderBy(desc(repertorios.criadoEm));
-
-    return list;
+    return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
+      return await tx
+        .select()
+        .from(repertorios)
+        .where(eq(repertorios.perfilId, perfil.id))
+        .orderBy(desc(repertorios.criadoEm));
+    });
   } catch {
     logOperationalFailure('redacoes.repertorios.list', 'persistence');
     throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível carregar os repertórios.');
@@ -67,23 +71,25 @@ export async function obterRedacoes() {
   const perfil = await requireRole('estudante');
 
   try {
-    const list = await db
-      .select({
-        id: redacoes.id,
-        formato: redacoes.formato,
-        tema: redacoes.tema,
-        texto: redacoes.texto,
-        minutosGastos: redacoes.minutosGastos,
-        notaTotal: redacoes.notaTotal,
-        escritaEm: redacoes.escritaEm,
-        generoNome: generos.nome
-      })
-      .from(redacoes)
-      .leftJoin(generos, eq(redacoes.generoId, generos.id))
-      .where(eq(redacoes.perfilId, perfil.id))
-      .orderBy(desc(redacoes.escritaEm));
-
-    return list;
+    return await db.transaction(async (tx) => {
+      await applyRlsContext(tx, perfil.id, perfil.papel);
+      return await tx
+        .select({
+          id: redacoes.id,
+          formato: redacoes.formato,
+          tema: redacoes.tema,
+          texto: redacoes.texto,
+          minutosGastos: redacoes.minutosGastos,
+          notaTotal: redacoes.notaTotal,
+          escritaEm: redacoes.escritaEm,
+          reescritadeId: redacoes.reescritadeId,
+          generoNome: generos.nome
+        })
+        .from(redacoes)
+        .leftJoin(generos, eq(redacoes.generoId, generos.id))
+        .where(eq(redacoes.perfilId, perfil.id))
+        .orderBy(desc(redacoes.escritaEm));
+    });
   } catch {
     logOperationalFailure('redacoes.list', 'persistence');
     throw new PublicOperationError('PERSISTENCE_ERROR', 'Não foi possível carregar as redações.');

@@ -32,13 +32,13 @@ export default function RedacoesPage() {
     setLoading(true);
     setMensagemErro('');
     try {
-      const red = await obterRedacoes();
+      const [red, rep, gen] = await Promise.all([
+        obterRedacoes(),
+        obterRepertorios(),
+        obterGenerosUECE()
+      ]);
       setRedacoesList(red);
-
-      const rep = await obterRepertorios();
       setRepertoriosList(rep);
-
-      const gen = await obterGenerosUECE();
       setGenerosList(gen);
       if (gen.length > 0) {
         setGeneroId(gen[0].id);
@@ -273,7 +273,9 @@ export default function RedacoesPage() {
                             </div>
                             <div className="text-right text-xs">
                               <span className="text-gray-400 block">{new Date(red.escritaEm).toLocaleDateString('pt-BR')}</span>
-                              <span className="font-bold text-[#0E3D4D] block mt-0.5">Nota: {red.notaTotal} pts</span>
+                              <span className="font-bold text-[#0E3D4D] block mt-0.5">
+                                {red.notaTotal !== null && red.notaTotal !== undefined ? `Nota: ${red.notaTotal} pts` : 'Aguardando correção'}
+                              </span>
                             </div>
                           </div>
                           <p className="text-xs text-gray-500 leading-relaxed max-h-32 overflow-y-auto font-['Lora'] italic bg-gray-50 p-3 rounded-lg border border-dashed">

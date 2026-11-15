@@ -2,7 +2,7 @@
 
 import { db } from '../../db';
 import { checkins, sessoes, redacoes, cards, revisoesTrimestrais } from '../../db/schema';
-import { eq, and, gte, sql, desc } from 'drizzle-orm';
+import { eq, and, gte, lte, sql, desc } from 'drizzle-orm';
 import { requireManagedStudentProfile, requireRole } from '../../lib/authorization';
 
 export interface QuinzenaResumo {
@@ -188,11 +188,27 @@ export async function registrarRevisaoTrimestral(dados: RevisaoTrimestralInput):
   const estudante = await requireManagedStudentProfile();
 
   try {
-    // Calculamos métricas médias para guardar na revisão trimestral
+    // Calculamos métricas derivadas reais para guardar na revisão trimestral
     const quinzenaInfo = await obterAcompanhamentoQuinzenal();
-    const mediaAderencia = 82.5; // Mock aproximado
-    const mediaSono = quinzenaInfo[0]?.mediaHorasSono || 7.8;
+    const somaBlocos = quinzenaInfo.reduce((acc, curr) => acc + curr.blocosConcluidos, 0);
+    const mediaAderencia = Math.min(100, Math.round((somaBlocos / 48) * 100));
+    const mediaSono = quinzenaInfo[0]?.mediaHorasSono || 0;
     const somaRedacoes = quinzenaInfo.reduce((acc, curr) => acc + curr.redacoesEscritas, 0);
+    const somaReescritas = quinzenaInfo.reduce((acc, curr) => acc + curr.redacoesReescritas, 0);
+
+    // Contar cards atrasados reais do estudante no motor FSRS
+    const [dueCardsCount] = await db
+      .select({ count: sql<number>`count(${cards.id})::int` })
+      .from(cards)
+      .where(
+        and(
+          eq(cards.perfilId, estudante.id),
+          eq(cards.status, 'aprovado'),
+          eq(cards.suspenso, false),
+          lte(cards.due, new Date())
+        )
+      );
+    const cardsAtrasadosReal = dueCardsCount?.count || 0;
 
     await db.insert(revisoesTrimestrais).values({
       estudantePerfilId: estudante.id,
@@ -200,9 +216,9 @@ export async function registrarRevisaoTrimestral(dados: RevisaoTrimestralInput):
       trimestre: dados.trimestre,
       ano: dados.ano,
       aderenciaPct: mediaAderencia,
-      cardsAtrasados: 12, // Aproximação FSRS
+      cardsAtrasados: cardsAtrasadosReal,
       redacoesEscritas: somaRedacoes,
-      redacoesReescritas: 1,
+      redacoesReescritas: somaReescritas,
       mediaSono,
       conversa: dados.conversa,
       decisoes: dados.decisoes,

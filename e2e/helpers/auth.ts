@@ -24,7 +24,7 @@ export const RESPONSAVEL_USER: MockSessionUser = {
 };
 
 export const CARLOS_USER: MockSessionUser = {
-  id: '10000000-0000-4000-8000-000000000003',
+  id: '30000000-0000-4000-8000-000000000001',
   name: 'Carlos Estudante Sintetico',
   email: 'carlos@medicina2029.staging',
   role: 'estudante',

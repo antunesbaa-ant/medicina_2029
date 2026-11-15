@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { obterCadernoErros, resolverErro, registrarErroManual } from '../app/actions/cadernoErros';
+import { obterCadernoErros, resolverErro } from '../app/actions/cadernoErros';
 import { obterCicloAtivo } from '../app/actions/ciclo';
 
 export default function CadernoErrosPage() {
@@ -15,24 +15,14 @@ export default function CadernoErrosPage() {
   const [selectedTipoErro, setSelectedTipoErro] = useState<string>('');
   const [selectedStatus, setSelectedStatus] = useState<string>('pendente'); // default pendente
 
-  // Manual error form state
-  const [exibirForm, setExibirForm] = useState<boolean>(false);
-  const [descricao, setDescricao] = useState<string>('');
-  const [tipoErroForm, setTipoErroForm] = useState<'conteudo' | 'interpretacao' | 'distracao' | 'calculo' | 'tempo'>('conteudo');
-  const [conceito, setConceito] = useState<string>('');
-  const [formDisciplina, setFormDisciplina] = useState<string>('');
-  const [formTopico, setFormTopico] = useState<string>('');
-  const [topicosList, setTopicosList] = useState<any[]>([]);
-  const [salvando, setSalvando] = useState<boolean>(false);
-
   const fetchErros = async () => {
     setLoading(true);
     setMensagemErro('');
     try {
       const res = await obterCadernoErros({
         disciplinaId: selectedDisciplina || undefined,
-        tipoErro: selectedTipoErro as any || undefined,
-        resolvido: selectedStatus === 'resolvido' ? true : selectedStatus === 'pendente' ? false : undefined
+        tipoErro: (selectedTipoErro as any) || undefined,
+        resolvido: selectedStatus === 'resolvido' ? true : selectedStatus === 'pendente' ? false : undefined,
       });
       setErrosList(res);
     } catch {
@@ -53,14 +43,11 @@ export default function CadernoErrosPage() {
         const ciclo = await obterCicloAtivo();
         if (ciclo) {
           const map = new Map<string, string>();
-          ciclo.blocos.forEach(b => {
+          ciclo.blocos.forEach((b) => {
             map.set(b.disciplinaId, b.disciplina.nome);
           });
           const list = Array.from(map.entries()).map(([id, nome]) => ({ id, nome }));
           setDisciplinas(list);
-          if (list.length > 0) {
-            setFormDisciplina(list[0].id);
-          }
         }
       } catch (err) {
         console.error(err);
@@ -73,45 +60,13 @@ export default function CadernoErrosPage() {
     try {
       const res = await resolverErro(id);
       if (res.ok) {
-        setErrosList(prev => prev.map(e => e.id === id ? { ...e, resolvidoEm: new Date() } : e));
+        setErrosList((prev) => prev.map((e) => (e.id === id ? { ...e, resolvidoEm: new Date() } : e)));
         fetchErros();
       } else {
         setMensagemErro(res.message);
       }
     } catch {
       setMensagemErro('Não foi possível atualizar o registro. Tente novamente.');
-    }
-  };
-
-  const handleSalvarErro = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!descricao || !formDisciplina || !conceito) return;
-
-    setSalvando(true);
-    try {
-      // Mock topic link or fallback
-      const topicoMockId = formTopico || '00000000-0000-0000-0000-000000000001';
-      const res = await registrarErroManual({
-        descricaoLivre: descricao,
-        topicoId: topicoMockId,
-        disciplinaId: formDisciplina,
-        estilo: 'enem',
-        tipoErro: tipoErroForm,
-        conceitoCorreto: conceito
-      });
-
-      if (res.ok) {
-        setDescricao('');
-        setConceito('');
-        setExibirForm(false);
-        fetchErros();
-      } else {
-        setMensagemErro(res.message);
-      }
-    } catch {
-      setMensagemErro('Não foi possível registrar o erro. Tente novamente.');
-    } finally {
-      setSalvando(false);
     }
   };
 
@@ -141,199 +96,196 @@ export default function CadernoErrosPage() {
           </p>
         </div>
 
-        <button
-          onClick={() => setExibirForm(!exibirForm)}
-          className="px-4 py-2 bg-[#0E3D4D] text-white text-xs font-bold rounded-lg hover:bg-[#17607A] transition-all"
-        >
-          {exibirForm ? 'Fechar Form' : '+ Registrar Erro Manual'}
-        </button>
+        <div className="inline-flex items-center gap-2 bg-[#FBF8F3] px-3.5 py-2 rounded-xl border border-[#D5CBB8] text-xs font-semibold text-[#0E3D4D]">
+          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span>Rastreamento Automático Ativo</span>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
-        {/* Left Column: Form or filters (4 cols) */}
+        {/* Left Column: Informational notice and filters (4 cols) */}
         <div className="lg:col-span-4 space-y-6">
-          {exibirForm ? (
-            <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm space-y-4">
-              <h2 className="text-lg font-semibold font-['Lora'] text-[#0E3D4D]">Registrar Novo Erro</h2>
-              
-              <form onSubmit={handleSalvarErro} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Dificuldade / O que errou?</label>
-                  <textarea
-                    value={descricao}
-                    onChange={e => setDescricao(e.target.value)}
-                    placeholder="Ex: Confundi mitocôndria com cloroplasto na fotossíntese..."
-                    rows={3}
-                    className="w-full p-2.5 border rounded-lg text-sm text-gray-700 focus:outline-none"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Conceito Correto (Fato a Fixar)</label>
-                  <input
-                    type="text"
-                    value={conceito}
-                    onChange={e => setConceito(e.target.value)}
-                    placeholder="Ex: A fotossíntese ocorre nos cloroplastos..."
-                    className="w-full px-3 py-2 border rounded-lg text-sm"
-                    required
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Disciplina</label>
-                    <select
-                      value={formDisciplina}
-                      onChange={e => setFormDisciplina(e.target.value)}
-                      className="w-full px-2 py-2 border rounded bg-white text-xs"
-                      required
-                    >
-                      {disciplinas.map(d => (
-                        <option key={d.id} value={d.id}>{d.nome}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo de Erro</label>
-                    <select
-                      value={tipoErroForm}
-                      onChange={e => setTipoErroForm(e.target.value as any)}
-                      className="w-full px-2 py-2 border rounded bg-white text-xs"
-                    >
-                      <option value="conteudo">Teoria</option>
-                      <option value="interpretacao">Interpretação</option>
-                      <option value="distracao">Atenção</option>
-                      <option value="calculo">Cálculo</option>
-                      <option value="tempo">Tempo</option>
-                    </select>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={salvando}
-                  className="w-full py-2 bg-[#0E3D4D] text-white text-xs font-bold rounded-lg hover:bg-[#17607A]"
-                >
-                  {salvando ? 'Gravando...' : 'Gravar no Caderno'}
-                </button>
-              </form>
+          <div className="bg-[#FBF8F3] border border-[#D5CBB8] p-5 rounded-2xl space-y-2 text-xs text-[#0E3D4D]">
+            <div className="flex items-center gap-1.5 font-bold text-xs uppercase tracking-wider text-[#17607A]">
+              <span>💡</span>
+              <span>Alimentação Automática</span>
             </div>
-          ) : (
-            <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm space-y-4">
-              <h2 className="text-lg font-semibold font-['Lora'] text-[#0E3D4D]">Filtros e Busca</h2>
-              
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Disciplina</label>
-                  <select
-                    value={selectedDisciplina}
-                    onChange={e => setSelectedDisciplina(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-md bg-white text-xs"
-                  >
-                    <option value="">Todas</option>
-                    {disciplinas.map(d => (
-                      <option key={d.id} value={d.id}>{d.nome}</option>
-                    ))}
-                  </select>
-                </div>
+            <p className="text-gray-600 leading-relaxed text-[11px]">
+              Os erros são catalogados automaticamente durante as sessões de estudo ao encerrar questões incorretas.
+              Isso garante a vinculação fidedigna da questão, tópico curricular e estilo de prova para revisão focada.
+            </p>
+          </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo de Erro</label>
-                  <select
-                    value={selectedTipoErro}
-                    onChange={e => setSelectedTipoErro(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-md bg-white text-xs"
-                  >
-                    <option value="">Todos</option>
-                    <option value="conteudo">Teoria / Conceito</option>
-                    <option value="interpretacao">Interpretação</option>
-                    <option value="distracao">Atenção / Distração</option>
-                    <option value="calculo">Cálculo</option>
-                    <option value="tempo">Tempo</option>
-                  </select>
-                </div>
+          <div className="bg-white p-6 rounded-2xl border border-gray-200 shadow-sm space-y-4">
+            <h2 className="text-base font-semibold font-['Lora'] text-[#0E3D4D] border-b pb-2">Filtros e Busca</h2>
 
-                <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Status</label>
-                  <select
-                    value={selectedStatus}
-                    onChange={e => setSelectedStatus(e.target.value)}
-                    className="w-full px-3 py-2 border rounded-md bg-white text-xs"
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Disciplina</label>
+                <select
+                  value={selectedDisciplina}
+                  onChange={(e) => setSelectedDisciplina(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg bg-white text-xs"
+                >
+                  <option value="">Todas</option>
+                  {disciplinas.map((d) => (
+                    <option key={d.id} value={d.id}>{d.nome}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Tipo de Erro</label>
+                <select
+                  value={selectedTipoErro}
+                  onChange={(e) => setSelectedTipoErro(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg bg-white text-xs"
+                >
+                  <option value="">Todos</option>
+                  <option value="conteudo">Teoria / Conteúdo</option>
+                  <option value="interpretacao">Interpretação</option>
+                  <option value="distracao">Distração / Atenção</option>
+                  <option value="calculo">Cálculo / Matemática</option>
+                  <option value="tempo">Estouro de Tempo</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Status</label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStatus('pendente')}
+                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                      selectedStatus === 'pendente'
+                        ? 'bg-[#0E3D4D] text-white border-[#0E3D4D]'
+                        : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                    }`}
                   >
-                    <option value="pendente">Pendentes (Não Resolvidos)</option>
-                    <option value="resolvido">Resolvidos</option>
-                    <option value="todos">Todos</option>
-                  </select>
+                    Pendentes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStatus('resolvido')}
+                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                      selectedStatus === 'resolvido'
+                        ? 'bg-[#0E3D4D] text-white border-[#0E3D4D]'
+                        : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    Resolvidos
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStatus('todos')}
+                    className={`flex-1 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                      selectedStatus === 'todos'
+                        ? 'bg-[#0E3D4D] text-white border-[#0E3D4D]'
+                        : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                    }`}
+                  >
+                    Todos
+                  </button>
                 </div>
               </div>
             </div>
-          )}
+          </div>
         </div>
 
-        {/* Right Column: Error Cards (8 cols) */}
+        {/* Right Column: Error list (8 cols) */}
         <div className="lg:col-span-8 space-y-4">
+          <div className="flex justify-between items-center text-xs text-gray-400 font-semibold mb-2">
+            <span>{errosList.length} registros encontrados</span>
+            <span>Ordenados por relevância e pendência</span>
+          </div>
+
           {loading ? (
             <p className="text-sm text-gray-400 text-center py-12">Carregando caderno de erros...</p>
           ) : errosList.length === 0 ? (
-            <div className="bg-white p-12 text-center rounded-lg border border-gray-200 shadow-sm">
-              <p className="text-sm font-semibold text-gray-500">Nenhum erro encontrado.</p>
-              <p className="text-xs text-gray-400 mt-1">Ótimo sinal! Continue praticando questões e monitorando lacunas.</p>
+            <div className="bg-white p-12 text-center rounded-2xl border border-gray-200 shadow-sm">
+              <span className="text-4xl block mb-2">🎉</span>
+              <p className="text-sm font-semibold text-gray-600">Nenhum erro encontrado com os filtros atuais.</p>
+              <p className="text-xs text-gray-400 mt-1">
+                Continue praticando suas sessões de estudo. Se errar alguma questão, ela será listada aqui.
+              </p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {errosList.map((err) => (
-                <div 
-                  key={err.id}
-                  className={`bg-white p-5 rounded-lg border shadow-sm transition-all hover:border-gray-300 flex flex-col md:flex-row justify-between items-start gap-4 ${
-                    err.resolvidoEm ? 'border-emerald-500/20 bg-emerald-500/[0.01]' : 'border-gray-200/80'
+            errosList.map((erro) => {
+              const isResolvido = !!erro.resolvidoEm;
+              return (
+                <div
+                  key={erro.id}
+                  className={`bg-white p-6 rounded-2xl border shadow-sm transition-all hover:border-gray-300 space-y-3 ${
+                    isResolvido ? 'border-emerald-200/60 bg-emerald-500/[0.01]' : 'border-gray-200'
                   }`}
                 >
-                  <div className="space-y-2 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: err.corHex }} />
-                      <span className="text-xs font-semibold text-gray-500">{err.disciplinaNome}</span>
-                      <span className="text-xs text-gray-400 font-medium">· Tópico: {err.topicoNome}</span>
-                    </div>
-
-                    <p className="font-['Lora'] text-sm leading-relaxed text-[#1B2A33]">
-                      {err.descricaoLivre}
-                    </p>
-
-                    <div className="bg-[#FBF8F3] p-3 rounded-lg border text-xs">
-                      <strong className="text-[#0E3D4D]">Conceito Correto:</strong>
-                      <p className="italic font-lora-read text-gray-600 mt-0.5">"{err.conceitoCorreto}"</p>
-                    </div>
-
-                    <div className="flex gap-2">
-                      <span className="bg-rose-500/10 text-rose-600 text-[10px] font-semibold px-2 py-0.5 rounded border border-rose-500/20">
-                        {getTipoErroLabel(err.tipoErro)}
+                  <div className="flex justify-between items-start gap-4 border-b pb-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded border"
+                        style={{
+                          backgroundColor: `${erro.corHex || '#0E3D4D'}15`,
+                          color: erro.corHex || '#0E3D4D',
+                          borderColor: `${erro.corHex || '#0E3D4D'}30`,
+                        }}
+                      >
+                        {erro.disciplinaNome}
                       </span>
-                      {err.resolvidoEm && (
-                        <span className="bg-emerald-500/10 text-emerald-600 text-[10px] font-semibold px-2 py-0.5 rounded border border-emerald-500/20">
-                          Resolvido em {new Date(err.resolvidoEm).toLocaleDateString('pt-BR')}
+                      <span className="text-xs text-gray-400">•</span>
+                      <span className="text-xs font-bold text-gray-700">{erro.topicoNome}</span>
+                      <span className="text-xs text-gray-400">•</span>
+                      <span className="text-[10px] font-semibold bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
+                        {getTipoErroLabel(erro.tipoErro)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {isResolvido ? (
+                        <span className="bg-emerald-500/10 text-emerald-600 text-[10px] font-bold px-2.5 py-1 rounded-full border border-emerald-500/20">
+                          Resolvido
                         </span>
+                      ) : (
+                        <button
+                          onClick={() => handleResolver(erro.id)}
+                          className="px-3 py-1 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 text-[10px] font-bold rounded-lg transition-all"
+                        >
+                          Marcar como Resolvido
+                        </button>
                       )}
                     </div>
                   </div>
 
-                  {!err.resolvidoEm && (
-                    <button
-                      onClick={() => handleResolver(err.id)}
-                      className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition-all w-full md:w-auto text-center self-end md:self-center"
-                    >
-                      Resolver
-                    </button>
-                  )}
+                  <div className="space-y-2 text-xs">
+                    <div>
+                      <strong className="text-gray-400 uppercase tracking-widest text-[9px] block mb-0.5">
+                        O que foi registrado:
+                      </strong>
+                      <p className="text-gray-800 leading-relaxed font-medium">
+                        {erro.descricaoLivre || 'Sem descrição livre informada.'}
+                      </p>
+                    </div>
+
+                    {erro.conceitoCorreto && (
+                      <div className="bg-[#FBF8F3] p-3 rounded-xl border border-[#D5CBB8] text-xs">
+                        <strong className="text-[#0E3D4D] font-bold uppercase tracking-wider text-[9px] block mb-0.5">
+                          Conceito Correto a Fixar:
+                        </strong>
+                        <p className="text-gray-700 leading-relaxed font-['Lora'] italic">"{erro.conceitoCorreto}"</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-between items-center text-[10px] text-gray-400 border-t pt-2 mt-2">
+                    <span>Criado em: {new Date(erro.criadoEm).toLocaleDateString('pt-BR')}</span>
+                    {isResolvido && erro.resolvidoEm && (
+                      <span>Superado em: {new Date(erro.resolvidoEm).toLocaleDateString('pt-BR')}</span>
+                    )}
+                  </div>
                 </div>
-              ))}
-            </div>
+              );
+            })
           )}
         </div>
-
       </div>
     </div>
   );

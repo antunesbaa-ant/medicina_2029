@@ -173,8 +173,8 @@ export default function ResponsavelPage() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Média de sono:</span>
-                      <span className={`${q.mediaHorasSono < 7.5 ? 'text-rose-600' : 'text-emerald-600'}`}>
-                        {q.mediaHorasSono}h / noite
+                      <span className={`${Number(q.mediaHorasSono) === 0 ? 'text-gray-400 font-normal italic' : Number(q.mediaHorasSono) < 7.5 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                        {Number(q.mediaHorasSono) === 0 ? 'Sem registros' : `${q.mediaHorasSono}h / noite`}
                       </span>
                     </div>
                     <div className="flex justify-between">
